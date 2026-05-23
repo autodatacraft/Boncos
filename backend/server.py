@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Request, Header
+from fastapi import FastAPI, APIRouter, Request, Header, HTTPException
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -115,7 +115,7 @@ async def create_session(body: SessionInput):
     async with httpx.AsyncClient() as http_client:
         resp = await http_client.get(EMERGENT_SESSION_URL, headers={"X-Session-ID": body.session_id})
         if resp.status_code != 200:
-            return {"error": "Invalid session"}, 401
+            raise HTTPException(status_code=401, detail="Invalid session")
         data = resp.json()
 
     email = data["email"]
@@ -150,7 +150,7 @@ async def create_session(body: SessionInput):
 async def auth_me(authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     if not user:
-        return {"error": "Unauthorized"}, 401
+        raise HTTPException(status_code=401, detail="Unauthorized")
     return UserResponse(**user)
 
 @api_router.post("/auth/logout")
@@ -165,7 +165,7 @@ async def auth_logout(authorization: Optional[str] = Header(None)):
 async def create_budget(body: BudgetCreate, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     if not user:
-        return {"error": "Unauthorized"}
+        raise HTTPException(status_code=401, detail="Unauthorized")
     
     # Deactivate any existing active budget
     await db.budgets.update_many(
@@ -193,7 +193,7 @@ async def create_budget(body: BudgetCreate, authorization: Optional[str] = Heade
 async def get_active_budget(authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     if not user:
-        return {"error": "Unauthorized"}
+        raise HTTPException(status_code=401, detail="Unauthorized")
     budget = await db.budgets.find_one(
         {"user_id": user["user_id"], "active": True},
         {"_id": 0}
@@ -215,14 +215,14 @@ async def get_active_budget(authorization: Optional[str] = Header(None)):
 async def create_expense(body: ExpenseCreate, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     if not user:
-        return {"error": "Unauthorized"}
+        raise HTTPException(status_code=401, detail="Unauthorized")
     
     budget = await db.budgets.find_one(
         {"budget_id": body.budget_id, "user_id": user["user_id"], "active": True},
         {"_id": 0}
     )
     if not budget:
-        return {"error": "Budget not found"}
+        raise HTTPException(status_code=404, detail="Budget not found")
     
     new_balance = budget["current_balance"] - body.amount
     await db.budgets.update_one(
@@ -247,7 +247,7 @@ async def create_expense(body: ExpenseCreate, authorization: Optional[str] = Hea
 async def get_expenses(budget_id: Optional[str] = None, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     if not user:
-        return {"error": "Unauthorized"}
+        raise HTTPException(status_code=401, detail="Unauthorized")
     
     query = {"user_id": user["user_id"]}
     if budget_id:
@@ -260,14 +260,14 @@ async def get_expenses(budget_id: Optional[str] = None, authorization: Optional[
 async def delete_expense(expense_id: str, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     if not user:
-        return {"error": "Unauthorized"}
+        raise HTTPException(status_code=401, detail="Unauthorized")
     
     expense = await db.expenses.find_one(
         {"expense_id": expense_id, "user_id": user["user_id"]},
         {"_id": 0}
     )
     if not expense:
-        return {"error": "Expense not found"}
+        raise HTTPException(status_code=404, detail="Expense not found")
     
     # Restore balance to budget
     await db.budgets.update_one(
@@ -282,7 +282,7 @@ async def delete_expense(expense_id: str, authorization: Optional[str] = Header(
 async def get_dashboard(authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     if not user:
-        return {"error": "Unauthorized"}
+        raise HTTPException(status_code=401, detail="Unauthorized")
     
     budget = await db.budgets.find_one(
         {"user_id": user["user_id"], "active": True},

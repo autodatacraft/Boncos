@@ -1,11 +1,21 @@
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
+import { LogBox } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { AuthProvider } from "@/src/contexts/AuthContext";
 import { ThemeProvider, useTheme } from "@/src/contexts/ThemeContext";
 import { LanguageProvider } from "@/src/contexts/LanguageContext";
+
+// Suppress Expo Go font loading errors (CDN sometimes returns empty files)
+LogBox.ignoreLogs([
+  'ExpoFontLoader',
+  'Font file for',
+  'Uncaught (in promise',
+  'Call to function',
+  'loadAsync',
+]);
 
 SplashScreen.preventAutoHideAsync();
 

@@ -93,4 +93,22 @@ export const t: Translations = {
   today_logged: { id: 'Sudah input hari ini!', en: 'Logged today!' },
   not_logged_today: { id: 'Belum input hari ini', en: "Haven't logged today" },
   input_amount: { id: 'Masukkan nominal', en: 'Enter amount' },
+  
+  // Edit budget
+  edit_budget: { id: 'Edit Budget', en: 'Edit Budget' },
+  edit: { id: 'Edit', en: 'Edit' },
+  budget_updated: { id: 'Budget diupdate!', en: 'Budget updated!' },
+  new_total: { id: 'Total Saldo Baru', en: 'New Total Balance' },
+
+  // Bulk delete
+  delete_selected: { id: 'Hapus Terpilih', en: 'Delete Selected' },
+  select_all: { id: 'Pilih Semua', en: 'Select All' },
+  deselect_all: { id: 'Batal Pilih', en: 'Deselect All' },
+
+  // Notifications
+  reminder_title: { id: 'Boncos Reminder', en: 'Boncos Reminder' },
+  reminder_body: { id: 'Belum input pengeluaran hari ini! Yuk catat biar ga boncos 💸', en: "You haven't logged expenses today! Log now to stay on budget 💸" },
+
+  // Refill
+  budget_refilled: { id: 'Budget sudah di-refill! 🎉', en: 'Budget refilled! 🎉' },
 };

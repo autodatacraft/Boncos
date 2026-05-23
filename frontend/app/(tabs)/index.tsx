@@ -20,6 +20,7 @@ import { useAuth } from '@/src/contexts/AuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { useLanguage } from '@/src/contexts/LanguageContext';
 import { apiFetch } from '@/src/utils/api';
+import { requestNotificationPermission, scheduleReminder, cancelReminders } from '@/src/utils/notifications';
 
 type Dashboard = {
   budget_id: string;
@@ -149,6 +150,15 @@ export default function DashboardScreen() {
       const streakData = await apiFetch('/streak', { token });
       if (streakData.current_streak !== undefined) {
         setStreak(streakData);
+        // Schedule reminders if user hasn't logged today
+        if (!streakData.today_logged) {
+          const granted = await requestNotificationPermission();
+          if (granted) {
+            scheduleReminder(s('reminder_title'), s('reminder_body'));
+          }
+        } else {
+          cancelReminders();
+        }
       }
     } catch (e) {
       console.error('Fetch error:', e);
@@ -198,6 +208,7 @@ export default function DashboardScreen() {
         setAmountDisplay('');
         setNote('');
         Keyboard.dismiss();
+        cancelReminders(); // User logged, cancel reminders
         fetchAll();
       }
     } catch (e) {

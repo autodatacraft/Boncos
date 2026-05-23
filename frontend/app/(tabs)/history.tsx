@@ -4,10 +4,11 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  FlatList,
+  SectionList,
   Alert,
   ActivityIndicator,
   RefreshControl,
+  ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
@@ -17,32 +18,15 @@ import { useTheme } from '@/src/contexts/ThemeContext';
 import { useLanguage } from '@/src/contexts/LanguageContext';
 import { apiFetch } from '@/src/utils/api';
 
-type Expense = {
-  expense_id: string;
-  amount: number;
-  note: string;
-  created_at: string;
-  budget_id: string;
-};
-
-type BudgetPot = {
-  budget_id: string;
-  label: string;
-  category: string;
-  icon: string;
-};
+type Expense = { expense_id: string; amount: number; note: string; created_at: string; budget_id: string };
+type BudgetPot = { budget_id: string; label: string; category: string; icon: string };
 
 function formatRupiah(n: number): string {
-  const abs = Math.abs(Math.round(n));
-  const formatted = abs.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-  return `Rp${formatted}`;
+  return `Rp${Math.abs(Math.round(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
 }
-
 function formatTime(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 }
-
 function formatDate(iso: string, lang: string): string {
   const d = new Date(iso);
   const today = new Date();
@@ -62,8 +46,10 @@ export default function HistoryScreen() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [budgets, setBudgets] = useState<BudgetPot[]>([]);
   const [selectedBudgetId, setSelectedBudgetId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -84,11 +70,53 @@ export default function HistoryScreen() {
   useFocusEffect(
     useCallback(() => {
       setLoading(true);
+      setSelectedIds(new Set());
       fetchData();
     }, [token, selectedBudgetId])
   );
 
-  const deleteExpense = (id: string) => {
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === expenses.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(expenses.map((e) => e.expense_id)));
+    }
+  };
+
+  const deleteSelected = () => {
+    if (selectedIds.size === 0) return;
+    const count = selectedIds.size;
+    const msg = lang === 'id' ? `Hapus ${count} pengeluaran?` : `Delete ${count} expenses?`;
+    Alert.alert(s('confirm_delete'), msg, [
+      { text: s('no'), style: 'cancel' },
+      {
+        text: s('yes'),
+        style: 'destructive',
+        onPress: async () => {
+          setDeleting(true);
+          await apiFetch('/expenses/bulk-delete', {
+            method: 'POST',
+            token,
+            body: { expense_ids: Array.from(selectedIds) },
+          });
+          setSelectedIds(new Set());
+          setDeleting(false);
+          fetchData();
+        },
+      },
+    ]);
+  };
+
+  const deleteSingle = (id: string) => {
     Alert.alert(s('confirm_delete'), '', [
       { text: s('no'), style: 'cancel' },
       {
@@ -102,24 +130,18 @@ export default function HistoryScreen() {
     ]);
   };
 
-  const getBudgetLabel = (budgetId: string) => {
-    const b = budgets.find((p) => p.budget_id === budgetId);
-    return b?.label || '';
-  };
+  const getBudgetLabel = (budgetId: string) => budgets.find((p) => p.budget_id === budgetId)?.label || '';
 
-  const getBudgetIcon = (budgetId: string) => {
-    const b = budgets.find((p) => p.budget_id === budgetId);
-    return (b?.icon || 'wallet') as any;
-  };
-
-  // Group by date
-  const grouped: { date: string; items: Expense[] }[] = [];
+  // Group by date for SectionList
+  const sections: { title: string; data: Expense[] }[] = [];
   expenses.forEach((exp) => {
     const dateKey = formatDate(exp.created_at, lang);
-    const existing = grouped.find((g) => g.date === dateKey);
-    if (existing) existing.items.push(exp);
-    else grouped.push({ date: dateKey, items: [exp] });
+    const existing = sections.find((s) => s.title === dateKey);
+    if (existing) existing.data.push(exp);
+    else sections.push({ title: dateKey, data: [exp] });
   });
+
+  const allSelected = expenses.length > 0 && selectedIds.size === expenses.length;
 
   if (loading) {
     return (
@@ -133,15 +155,65 @@ export default function HistoryScreen() {
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top }]} testID="history-screen">
       <Text style={[styles.title, { color: colors.text }]}>{s('history')}</Text>
 
-      {/* Budget filter */}
-      {budgets.length > 1 && (
-        <ScrollFilterRow
-          budgets={budgets}
-          selected={selectedBudgetId}
-          onSelect={(id) => { setSelectedBudgetId(id); setLoading(true); }}
-          colors={colors}
-          s={s}
-        />
+      {/* Budget filter - FIXED HEIGHT pills */}
+      {budgets.length > 0 && (
+        <View style={styles.filterWrap}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+            <TouchableOpacity
+              testID="filter-all"
+              style={[styles.filterPill, { backgroundColor: !selectedBudgetId ? colors.statusAman : colors.card, borderColor: colors.border }]}
+              onPress={() => { setSelectedBudgetId(null); setLoading(true); }}
+            >
+              <Text style={[styles.filterPillText, { color: !selectedBudgetId ? '#111' : colors.text }]}>{s('all_budgets')}</Text>
+            </TouchableOpacity>
+            {budgets.map((b) => {
+              const active = selectedBudgetId === b.budget_id;
+              return (
+                <TouchableOpacity
+                  key={b.budget_id}
+                  testID={`filter-${b.budget_id}`}
+                  style={[styles.filterPill, { backgroundColor: active ? colors.statusAman : colors.card, borderColor: colors.border }]}
+                  onPress={() => { setSelectedBudgetId(b.budget_id); setLoading(true); }}
+                >
+                  <Text style={[styles.filterPillText, { color: active ? '#111' : colors.text }]}>{b.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* Select all + Delete selected bar */}
+      {expenses.length > 0 && (
+        <View style={[styles.actionBar, { borderColor: colors.border }]}>
+          <TouchableOpacity testID="select-all-btn" style={styles.selectAllRow} onPress={toggleSelectAll}>
+            <View style={[styles.checkbox, { borderColor: colors.border, backgroundColor: allSelected ? colors.statusAman : 'transparent' }]}>
+              {allSelected && <Ionicons name="checkmark" size={14} color="#111" />}
+            </View>
+            <Text style={[styles.selectAllText, { color: colors.textSecondary }]}>
+              {allSelected ? (lang === 'id' ? 'Batal Pilih' : 'Deselect All') : (lang === 'id' ? 'Pilih Semua' : 'Select All')}
+            </Text>
+          </TouchableOpacity>
+          {selectedIds.size > 0 && (
+            <TouchableOpacity
+              testID="bulk-delete-btn"
+              style={[styles.bulkDeleteBtn, { backgroundColor: colors.statusBoncos, borderColor: colors.border }]}
+              onPress={deleteSelected}
+              disabled={deleting}
+            >
+              {deleting ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="trash-outline" size={14} color="#fff" />
+                  <Text style={styles.bulkDeleteText}>
+                    {lang === 'id' ? `Hapus (${selectedIds.size})` : `Delete (${selectedIds.size})`}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
       )}
 
       {expenses.length === 0 ? (
@@ -150,104 +222,113 @@ export default function HistoryScreen() {
           <Text style={[styles.emptyText, { color: colors.textSecondary }]}>{s('no_expenses')}</Text>
         </View>
       ) : (
-        <FlatList
-          data={grouped}
-          keyExtractor={(item) => item.date}
+        <SectionList
+          sections={sections}
+          keyExtractor={(item) => item.expense_id}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchData(); }} tintColor={colors.statusAman} />}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 20 }}
-          renderItem={({ item: group }) => (
-            <View style={styles.group}>
-              <Text style={[styles.groupDate, { color: colors.textSecondary }]}>{group.date}</Text>
-              {group.items.map((exp) => (
-                <View
-                  key={exp.expense_id}
-                  testID={`expense-item-${exp.expense_id}`}
-                  style={[styles.expenseItem, { backgroundColor: colors.card, borderColor: colors.border, shadowColor: colors.shadow }]}
-                >
-                  <View style={[styles.expenseIcon, { backgroundColor: colors.background, borderColor: colors.border }]}>
-                    <Ionicons name={getBudgetIcon(exp.budget_id)} size={16} color={colors.text} />
-                  </View>
-                  <View style={styles.expenseInfo}>
-                    <Text style={[styles.expenseAmount, { color: colors.text }]}>{formatRupiah(exp.amount)}</Text>
-                    {exp.note ? <Text style={[styles.expenseNote, { color: colors.textSecondary }]} numberOfLines={1}>{exp.note}</Text> : null}
-                    <View style={styles.expenseMeta}>
-                      <Text style={[styles.expenseBudget, { color: colors.textSecondary }]}>{getBudgetLabel(exp.budget_id)}</Text>
-                      <Text style={[styles.expenseTime, { color: colors.textSecondary }]}>{formatTime(exp.created_at)}</Text>
-                    </View>
-                  </View>
-                  <TouchableOpacity
-                    testID={`delete-expense-${exp.expense_id}`}
-                    style={[styles.deleteBtn, { backgroundColor: colors.statusBoncos, borderColor: colors.border }]}
-                    onPress={() => deleteExpense(exp.expense_id)}
-                  >
-                    <Ionicons name="trash" size={14} color="#fff" />
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </View>
+          renderSectionHeader={({ section }) => (
+            <Text style={[styles.groupDate, { color: colors.textSecondary }]}>{section.title}</Text>
           )}
+          renderItem={({ item: exp }) => {
+            const isChecked = selectedIds.has(exp.expense_id);
+            return (
+              <View
+                testID={`expense-item-${exp.expense_id}`}
+                style={[styles.expenseItem, { backgroundColor: colors.card, borderColor: colors.border, shadowColor: colors.shadow }]}
+              >
+                {/* Checkbox */}
+                <TouchableOpacity
+                  testID={`checkbox-${exp.expense_id}`}
+                  style={[styles.checkbox, { borderColor: colors.border, backgroundColor: isChecked ? colors.statusAman : 'transparent' }]}
+                  onPress={() => toggleSelect(exp.expense_id)}
+                >
+                  {isChecked && <Ionicons name="checkmark" size={14} color="#111" />}
+                </TouchableOpacity>
+
+                {/* Info */}
+                <View style={styles.expenseInfo}>
+                  <Text style={[styles.expenseAmount, { color: colors.text }]}>{formatRupiah(exp.amount)}</Text>
+                  {exp.note ? <Text style={[styles.expenseNote, { color: colors.textSecondary }]} numberOfLines={1}>{exp.note}</Text> : null}
+                  <View style={styles.expenseMeta}>
+                    <Text style={[styles.expenseBudget, { color: colors.textSecondary }]}>{getBudgetLabel(exp.budget_id)}</Text>
+                    <Text style={[styles.expenseTime, { color: colors.textSecondary }]}>{formatTime(exp.created_at)}</Text>
+                  </View>
+                </View>
+
+                {/* X delete icon */}
+                <TouchableOpacity
+                  testID={`delete-expense-${exp.expense_id}`}
+                  onPress={() => deleteSingle(exp.expense_id)}
+                  style={styles.xDeleteBtn}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="close-circle" size={22} color={colors.statusBoncos} />
+                </TouchableOpacity>
+              </View>
+            );
+          }}
         />
       )}
     </View>
   );
 }
 
-// Budget filter chips
-import { ScrollView } from 'react-native';
-
-function ScrollFilterRow({ budgets, selected, onSelect, colors, s }: {
-  budgets: BudgetPot[];
-  selected: string | null;
-  onSelect: (id: string | null) => void;
-  colors: any;
-  s: (k: string) => string;
-}) {
-  return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterScroll} contentContainerStyle={styles.filterContent}>
-      <TouchableOpacity
-        style={[styles.filterChip, { backgroundColor: !selected ? colors.statusAman : colors.card, borderColor: colors.border }]}
-        onPress={() => onSelect(null)}
-      >
-        <Text style={[styles.filterChipText, { color: !selected ? '#111' : colors.text }]}>{s('all_budgets')}</Text>
-      </TouchableOpacity>
-      {budgets.map((b) => (
-        <TouchableOpacity
-          key={b.budget_id}
-          style={[styles.filterChip, { backgroundColor: selected === b.budget_id ? colors.statusAman : colors.card, borderColor: colors.border }]}
-          onPress={() => onSelect(b.budget_id)}
-        >
-          <Ionicons name={(b.icon || 'wallet') as any} size={14} color={selected === b.budget_id ? '#111' : colors.text} />
-          <Text style={[styles.filterChipText, { color: selected === b.budget_id ? '#111' : colors.text }]}>{b.label}</Text>
-        </TouchableOpacity>
-      ))}
-    </ScrollView>
-  );
-}
-
 const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  title: { fontSize: 28, fontWeight: '900', letterSpacing: -1, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12 },
+  title: { fontSize: 28, fontWeight: '900', letterSpacing: -1, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
   emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 100 },
   emptyText: { fontSize: 16, fontWeight: '600', marginTop: 12 },
 
-  // Filter
-  filterScroll: { paddingHorizontal: 20, marginBottom: 12 },
-  filterContent: { gap: 8 },
-  filterChip: {
+  // Fixed filter pills
+  filterWrap: { height: 44, marginBottom: 8 },
+  filterRow: { paddingHorizontal: 20, gap: 8, alignItems: 'center' },
+  filterPill: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 2,
+    height: 36,
+    justifyContent: 'center',
+  },
+  filterPillText: { fontSize: 13, fontWeight: '700' },
+
+  // Action bar
+  actionBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    marginBottom: 4,
+  },
+  selectAllRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  selectAllText: { fontSize: 13, fontWeight: '600' },
+  bulkDeleteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 16,
+    borderRadius: 10,
     borderWidth: 2,
   },
-  filterChipText: { fontSize: 13, fontWeight: '700' },
+  bulkDeleteText: { fontSize: 12, fontWeight: '700', color: '#fff' },
 
-  group: { marginBottom: 16 },
-  groupDate: { fontSize: 13, fontWeight: '700', marginBottom: 8, letterSpacing: 0.5, textTransform: 'uppercase' },
+  // Checkbox
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+
+  groupDate: { fontSize: 13, fontWeight: '700', marginBottom: 8, marginTop: 12, letterSpacing: 0.5, textTransform: 'uppercase' },
   expenseItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -260,28 +341,14 @@ const styles = StyleSheet.create({
     shadowRadius: 0,
     elevation: 3,
   },
-  expenseIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 10,
-  },
   expenseInfo: { flex: 1 },
   expenseAmount: { fontSize: 17, fontWeight: '800', letterSpacing: -0.5 },
   expenseNote: { fontSize: 13, marginTop: 1 },
   expenseMeta: { flexDirection: 'row', gap: 8, marginTop: 3 },
   expenseBudget: { fontSize: 11, fontWeight: '600' },
   expenseTime: { fontSize: 11 },
-  deleteBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    borderWidth: 2,
-    justifyContent: 'center',
-    alignItems: 'center',
+  xDeleteBtn: {
+    padding: 4,
     marginLeft: 8,
   },
 });

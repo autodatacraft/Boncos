@@ -38,8 +38,10 @@ class UserResponse(BaseModel):
 
 class BudgetCreate(BaseModel):
     total_balance: float
-    refill_date: str  # ISO date string
+    refill_date: str
     label: Optional[str] = "Budget Utama"
+    category: Optional[str] = "umum"
+    icon: Optional[str] = "wallet"
 
 class BudgetResponse(BaseModel):
     budget_id: str
@@ -48,6 +50,8 @@ class BudgetResponse(BaseModel):
     current_balance: float
     refill_date: str
     label: str
+    category: str
+    icon: str
     created_at: str
 
 class ExpenseCreate(BaseModel):
@@ -75,6 +79,14 @@ class DashboardResponse(BaseModel):
     today_remaining: float
     health_status: str
     total_spent: float
+    category: str
+    icon: str
+
+class StreakResponse(BaseModel):
+    current_streak: int
+    longest_streak: int
+    today_logged: bool
+    last_7_days: list
 
 # ─── Auth helpers ───
 EMERGENT_SESSION_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
@@ -105,8 +117,10 @@ async def startup():
     await db.user_sessions.create_index("user_id")
     await db.user_sessions.create_index("expires_at", expireAfterSeconds=0)
     await db.budgets.create_index("user_id")
+    await db.budgets.create_index("budget_id", unique=True)
     await db.expenses.create_index([("user_id", 1), ("budget_id", 1)])
     await db.expenses.create_index("created_at")
+    await db.daily_checkins.create_index([("user_id", 1), ("date", 1)], unique=True)
     logger.info("MongoDB indexes created")
 
 # ─── Auth Routes ───
@@ -167,12 +181,6 @@ async def create_budget(body: BudgetCreate, authorization: Optional[str] = Heade
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
     
-    # Deactivate any existing active budget
-    await db.budgets.update_many(
-        {"user_id": user["user_id"], "active": True},
-        {"$set": {"active": False}}
-    )
-    
     budget_id = f"budget_{uuid.uuid4().hex[:12]}"
     budget = {
         "budget_id": budget_id,
@@ -181,6 +189,8 @@ async def create_budget(body: BudgetCreate, authorization: Optional[str] = Heade
         "current_balance": body.total_balance,
         "refill_date": body.refill_date,
         "label": body.label or "Budget Utama",
+        "category": body.category or "umum",
+        "icon": body.icon or "wallet",
         "active": True,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -190,25 +200,30 @@ async def create_budget(body: BudgetCreate, authorization: Optional[str] = Heade
     return BudgetResponse(**budget)
 
 @api_router.get("/budgets")
-async def get_active_budget(authorization: Optional[str] = Header(None)):
+async def get_budgets(authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    budget = await db.budgets.find_one(
+    budgets = await db.budgets.find(
         {"user_id": user["user_id"], "active": True},
-        {"_id": 0}
+        {"_id": 0, "active": 0}
+    ).to_list(50)
+    return {"budgets": budgets}
+
+@api_router.delete("/budgets/{budget_id}")
+async def delete_budget(budget_id: str, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    result = await db.budgets.update_one(
+        {"budget_id": budget_id, "user_id": user["user_id"]},
+        {"$set": {"active": False}}
     )
-    if not budget:
-        return {"budget": None}
-    return {
-        "budget_id": budget["budget_id"],
-        "user_id": budget["user_id"],
-        "total_balance": budget["total_balance"],
-        "current_balance": budget["current_balance"],
-        "refill_date": budget["refill_date"],
-        "label": budget["label"],
-        "created_at": budget["created_at"],
-    }
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Budget not found")
+    # Also delete related expenses
+    await db.expenses.delete_many({"budget_id": budget_id, "user_id": user["user_id"]})
+    return {"message": "Budget deleted"}
 
 # ─── Expense Routes ───
 @api_router.post("/expenses")
@@ -231,16 +246,29 @@ async def create_expense(body: ExpenseCreate, authorization: Optional[str] = Hea
     )
     
     expense_id = f"exp_{uuid.uuid4().hex[:12]}"
+    now = datetime.now(timezone.utc)
     expense = {
         "expense_id": expense_id,
         "user_id": user["user_id"],
         "budget_id": body.budget_id,
         "amount": body.amount,
         "note": body.note or "",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": now.isoformat(),
     }
     await db.expenses.insert_one(expense)
     del expense["_id"]
+
+    # Record daily checkin for streak
+    today_str = now.strftime("%Y-%m-%d")
+    try:
+        await db.daily_checkins.update_one(
+            {"user_id": user["user_id"], "date": today_str},
+            {"$set": {"user_id": user["user_id"], "date": today_str, "updated_at": now.isoformat()}},
+            upsert=True
+        )
+    except Exception:
+        pass  # Ignore duplicate key on race condition
+
     return ExpenseResponse(**expense)
 
 @api_router.get("/expenses")
@@ -269,7 +297,6 @@ async def delete_expense(expense_id: str, authorization: Optional[str] = Header(
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")
     
-    # Restore balance to budget
     await db.budgets.update_one(
         {"budget_id": expense["budget_id"], "active": True},
         {"$inc": {"current_balance": expense["amount"]}}
@@ -279,24 +306,23 @@ async def delete_expense(expense_id: str, authorization: Optional[str] = Header(
 
 # ─── Dashboard Route ───
 @api_router.get("/dashboard")
-async def get_dashboard(authorization: Optional[str] = Header(None)):
+async def get_dashboard(budget_id: Optional[str] = None, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
     
-    budget = await db.budgets.find_one(
-        {"user_id": user["user_id"], "active": True},
-        {"_id": 0}
-    )
+    query = {"user_id": user["user_id"], "active": True}
+    if budget_id:
+        query["budget_id"] = budget_id
+    
+    budget = await db.budgets.find_one(query, {"_id": 0})
     if not budget:
         return {"dashboard": None}
     
-    # Calculate days remaining
     refill_date = datetime.fromisoformat(budget["refill_date"]).replace(tzinfo=timezone.utc)
     now = datetime.now(timezone.utc)
     days_remaining = max((refill_date - now).days, 1)
     
-    # Calculate today's spending
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     today_expenses = await db.expenses.find(
         {
@@ -308,14 +334,10 @@ async def get_dashboard(authorization: Optional[str] = Header(None)):
     ).to_list(500)
     today_spent = sum(e["amount"] for e in today_expenses)
     
-    # Total spent
     total_spent = budget["total_balance"] - budget["current_balance"]
-    
-    # Daily allowance
     daily_allowance = budget["current_balance"] / days_remaining if days_remaining > 0 else 0
     today_remaining = daily_allowance - today_spent
     
-    # Health status
     ratio = budget["current_balance"] / budget["total_balance"] if budget["total_balance"] > 0 else 0
     if ratio >= 0.6:
         health_status = "aman"
@@ -338,6 +360,70 @@ async def get_dashboard(authorization: Optional[str] = Header(None)):
         today_remaining=round(today_remaining, 0),
         health_status=health_status,
         total_spent=total_spent,
+        category=budget.get("category", "umum"),
+        icon=budget.get("icon", "wallet"),
+    )
+
+# ─── Streak Route ───
+@api_router.get("/streak")
+async def get_streak(authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    now = datetime.now(timezone.utc)
+    today_str = now.strftime("%Y-%m-%d")
+    
+    # Get all checkins sorted desc
+    checkins = await db.daily_checkins.find(
+        {"user_id": user["user_id"]},
+        {"_id": 0}
+    ).sort("date", -1).to_list(365)
+    
+    checkin_dates = set(c["date"] for c in checkins)
+    today_logged = today_str in checkin_dates
+    
+    # Calculate current streak
+    current_streak = 0
+    check_date = now
+    # If today not logged, start checking from yesterday
+    if not today_logged:
+        check_date = now - timedelta(days=1)
+    
+    while True:
+        d = check_date.strftime("%Y-%m-%d")
+        if d in checkin_dates:
+            current_streak += 1
+            check_date -= timedelta(days=1)
+        else:
+            break
+    
+    # Calculate longest streak
+    longest_streak = 0
+    if checkins:
+        sorted_dates = sorted(checkin_dates)
+        streak = 1
+        for i in range(1, len(sorted_dates)):
+            prev = datetime.strptime(sorted_dates[i-1], "%Y-%m-%d")
+            curr = datetime.strptime(sorted_dates[i], "%Y-%m-%d")
+            if (curr - prev).days == 1:
+                streak += 1
+            else:
+                longest_streak = max(longest_streak, streak)
+                streak = 1
+        longest_streak = max(longest_streak, streak)
+    
+    # Last 7 days
+    last_7 = []
+    for i in range(6, -1, -1):
+        d = (now - timedelta(days=i)).strftime("%Y-%m-%d")
+        last_7.append({"date": d, "logged": d in checkin_dates})
+    
+    return StreakResponse(
+        current_streak=current_streak,
+        longest_streak=longest_streak,
+        today_logged=today_logged,
+        last_7_days=last_7,
     )
 
 # ─── Health check ───

@@ -66,4 +66,31 @@ export const t: Translations = {
   no: { id: 'Tidak', en: 'No' },
   budget_saved: { id: 'Budget tersimpan!', en: 'Budget saved!' },
   expense_saved: { id: 'Pengeluaran tercatat!', en: 'Expense logged!' },
+
+  // Multi budget pot
+  budget_pots: { id: 'Budget Pot', en: 'Budget Pots' },
+  add_pot: { id: 'Tambah Pot', en: 'Add Pot' },
+  category: { id: 'Kategori', en: 'Category' },
+  select_budget: { id: 'Pilih Budget', en: 'Select Budget' },
+  all_budgets: { id: 'Semua Budget', en: 'All Budgets' },
+  no_pots: { id: 'Belum ada pot. Tambah di bawah!', en: 'No pots yet. Add one below!' },
+  delete_pot: { id: 'Hapus pot ini?', en: 'Delete this pot?' },
+  pot_deleted: { id: 'Pot dihapus', en: 'Pot deleted' },
+
+  // Categories
+  cat_makan: { id: 'Makan', en: 'Food' },
+  cat_transport: { id: 'Transport', en: 'Transport' },
+  cat_kopi: { id: 'Kopi/Jajan', en: 'Coffee/Snacks' },
+  cat_entertainment: { id: 'Hiburan', en: 'Entertainment' },
+  cat_belanja: { id: 'Belanja', en: 'Shopping' },
+  cat_umum: { id: 'Umum', en: 'General' },
+
+  // Streak
+  streak: { id: 'Streak', en: 'Streak' },
+  current_streak: { id: 'Streak Saat Ini', en: 'Current Streak' },
+  longest_streak: { id: 'Streak Terlama', en: 'Longest Streak' },
+  days: { id: 'hari', en: 'days' },
+  today_logged: { id: 'Sudah input hari ini!', en: 'Logged today!' },
+  not_logged_today: { id: 'Belum input hari ini', en: "Haven't logged today" },
+  input_amount: { id: 'Masukkan nominal', en: 'Enter amount' },
 };

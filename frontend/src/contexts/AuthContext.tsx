@@ -10,6 +10,8 @@ type User = {
   email: string;
   name: string;
   picture: string;
+  subscription_plan?: string;
+  supporter_badge?: string | null;
 } | null;
 
 type AuthContextType = {
@@ -56,6 +58,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: data.email,
           name: data.name,
           picture: data.picture,
+          subscription_plan: data.subscription_plan || 'FREE',
+          supporter_badge: data.supporter_badge,
         });
       }
     } catch (e) {
@@ -76,7 +80,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const data = await apiFetch('/auth/me', { token: storedToken });
         if (data.user_id) {
           setToken(storedToken);
-          setUser(data);
+          setUser({
+            ...data,
+            subscription_plan: data.subscription_plan || 'FREE',
+          });
           return;
         }
         // Token invalid, clear it

@@ -8,13 +8,19 @@ import { AuthProvider } from "@/src/contexts/AuthContext";
 import { ThemeProvider, useTheme } from "@/src/contexts/ThemeContext";
 import { LanguageProvider } from "@/src/contexts/LanguageContext";
 
-// Suppress Expo Go font loading errors (CDN sometimes returns empty files)
+// Suppress Expo Go errors (font loading, notifications, etc.)
 LogBox.ignoreLogs([
   'ExpoFontLoader',
   'Font file for',
   'Uncaught (in promise',
   'Call to function',
   'loadAsync',
+  'expo-notifications',
+  'Push notifications',
+  'remote notifications',
+  'Listening to push token',
+  'shadow*',
+  'props.pointerEvents',
 ]);
 
 SplashScreen.preventAutoHideAsync();

@@ -22,6 +22,13 @@ import { useLanguage } from '@/src/contexts/LanguageContext';
 import { apiFetch } from '@/src/utils/api';
 import { requestNotificationPermission, scheduleReminder, cancelReminders } from '@/src/utils/notifications';
 
+function getGreeting(s: (k: string) => string): string {
+  const h = new Date().getHours();
+  if (h < 12) return s('good_morning');
+  if (h < 18) return s('good_afternoon');
+  return s('good_evening');
+}
+
 type Dashboard = {
   budget_id: string;
   label: string;
@@ -125,10 +132,11 @@ export default function DashboardScreen() {
       const pots: BudgetPot[] = budgetsData.budgets || [];
       setBudgets(pots);
 
-      // Auto-select first budget if none selected
+      // Auto-select first non-locked budget if none selected
       let budgetId = selectedBudgetId;
-      if (!budgetId && pots.length > 0) {
-        budgetId = pots[0].budget_id;
+      const activePots = pots.filter((p: any) => !p.is_locked);
+      if (!budgetId && activePots.length > 0) {
+        budgetId = activePots[0].budget_id;
         setSelectedBudgetId(budgetId);
       }
 
@@ -266,8 +274,13 @@ export default function DashboardScreen() {
         <View style={styles.greetingRow}>
           <View style={{ flex: 1 }}>
             <Text style={[styles.greeting, { color: colors.textSecondary }]}>
-              {s('welcome')}, {user?.name?.split(' ')[0]} 👋
+              {getGreeting(s)}, {user?.name?.split(' ')[0]} 👋
             </Text>
+            {user?.supporter_badge && (
+              <View style={[styles.greetBadge, { backgroundColor: colors.statusAman }]}>
+                <Text style={styles.greetBadgeText}>{user.supporter_badge}</Text>
+              </View>
+            )}
             <Text style={[styles.dateText, { color: colors.textSecondary }]}>
               {new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long' })}
             </Text>
@@ -284,9 +297,8 @@ export default function DashboardScreen() {
         {/* Budget Pot Selector - horizontal scroll */}
         {budgets.length > 1 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.potScroll} contentContainerStyle={styles.potScrollContent}>
-            {budgets.map((pot) => {
+            {budgets.filter((p: any) => !p.is_locked).map((pot) => {
               const isSelected = pot.budget_id === selectedBudgetId;
-              const iconName = CATEGORY_ICONS[pot.category] || 'wallet';
               return (
                 <TouchableOpacity
                   key={pot.budget_id}
@@ -303,7 +315,6 @@ export default function DashboardScreen() {
                     setLoading(true);
                   }}
                 >
-                  <Ionicons name={iconName as any} size={16} color={isSelected ? '#111' : colors.text} />
                   <Text style={[styles.potChipText, { color: isSelected ? '#111' : colors.text }]}>
                     {pot.label}
                   </Text>
@@ -489,6 +500,8 @@ const styles = StyleSheet.create({
   scroll: { paddingHorizontal: 20 },
   greetingRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
   greeting: { fontSize: 16, fontWeight: '600' },
+  greetBadge: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, marginTop: 4 },
+  greetBadgeText: { fontSize: 10, fontWeight: '800', color: '#111' },
   dateText: { fontSize: 13, marginTop: 2 },
   noBudgetText: { fontSize: 16, fontWeight: '600', textAlign: 'center', marginTop: 16, paddingHorizontal: 32 },
 

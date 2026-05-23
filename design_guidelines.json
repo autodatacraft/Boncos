@@ -1,0 +1,109 @@
+{
+  "theme": {
+    "domain": "Finance / Budgeting Mobile App (React Native Expo)",
+    "archetype": "3 (Pastel & Soft) with Neo-Brutalist E1 Twist",
+    "mode": "Hybrid (User Toggleable Light and Dark Mode)"
+  },
+  "typography": {
+    "headings": {
+      "family": "Outfit",
+      "weights": ["700", "900"],
+      "usage": "Use massive sizes (text-5xl, text-6xl) for the daily allowance number ('Jatah Hari Ini') and status tags. Extremely tight tracking."
+    },
+    "body": {
+      "family": "Manrope",
+      "weights": ["400", "500", "700"],
+      "usage": "Clean, highly readable text for lists, dates, and small labels."
+    }
+  },
+  "colors": {
+    "light": {
+      "background": "#F4F4F4",
+      "card_bg": "#FFFFFF",
+      "text": "#111111",
+      "border": "#111111",
+      "shadow": "#111111",
+      "status_aman": "#A3E635",
+      "status_agak_panas": "#FDE047",
+      "status_rem_dikit": "#FB923C",
+      "status_boncos": "#EF4444"
+    },
+    "dark": {
+      "background": "#0F172A",
+      "card_bg": "#1E293B",
+      "text": "#FDFDFD",
+      "border": "#FDFDFD",
+      "shadow": "#FDFDFD",
+      "status_aman": "#A3E635",
+      "status_agak_panas": "#FDE047",
+      "status_rem_dikit": "#FB923C",
+      "status_boncos": "#EF4444"
+    }
+  },
+  "layout_and_spacing": {
+    "philosophy": "Mobile-first, touch-friendly bento vertical flow. Generous padding (p-6 to p-8) inside major containers to avoid text collision.",
+    "container": "p-6",
+    "gap": "gap-4 md:gap-6",
+    "border_radius": "rounded-2xl. In neo-brutalism, we mix soft corners with hard thick borders and solid drop shadows."
+  },
+  "components": {
+    "quick_expense_buttons": {
+      "name": "Super Fast Expense Input Grid",
+      "description": "Grid of 4 chunky buttons (10k, 20k, 50k, 100k) for lightning-fast entry.",
+      "style": "bg-white dark:bg-slate-800 border-2 border-black dark:border-white p-4 rounded-2xl shadow-[4px_4px_0_#111] dark:shadow-[4px_4px_0_#FFF] active:translate-x-1 active:translate-y-1 active:shadow-none flex items-center justify-center",
+      "typography": "font-outfit font-black text-2xl"
+    },
+    "dashboard_card": {
+      "name": "Daily Allowance Dashboard",
+      "description": "Hero section. The background color dynamically changes based on Budget Health Status (Aman=Green, Panas=Yellow, Rem=Orange, Boncos=Red).",
+      "style": "border-4 border-black dark:border-white p-8 rounded-[32px] shadow-[8px_8px_0_#111] dark:shadow-[8px_8px_0_#FFF] mb-8",
+      "typography": "text-5xl or text-6xl font-black font-outfit tracking-tighter text-black dark:text-black (ensure text is always black on these bright backgrounds for contrast)"
+    },
+    "budget_health_tag": {
+      "description": "A thick, pill-shaped tag indicating the current status.",
+      "style": "inline-flex px-4 py-2 bg-black text-white dark:bg-white dark:text-black rounded-full uppercase tracking-[0.2em] text-xs font-bold font-outfit"
+    },
+    "expense_history_item": {
+      "description": "List item for past expenses with swipe/delete functionality.",
+      "style": "flex flex-row items-center justify-between bg-white dark:bg-slate-800 border-2 border-black dark:border-white p-4 mb-4 rounded-xl shadow-[4px_4px_0_#111] dark:shadow-[4px_4px_0_#FFF]",
+      "delete_button": "bg-red-500 border-2 border-black p-3 rounded-lg shadow-[2px_2px_0_#111]"
+    }
+  },
+  "interactions": {
+    "buttons": "Mobile native feel. Rely on `TouchableOpacity` (or NativeWind's `active:` pseudo-class) to trigger the press down effect: the hard shadow collapses (`shadow-none`) and the box translates down and right (`translate-x-[4px] translate-y-[4px]`).",
+    "animations": "Use snappy layout animations. Avoid slow web-like fades."
+  },
+  "assets": {
+    "icons": "Use `lucide-react-native` for all UI adornments.",
+    "images": {
+      "status_aman": {
+        "url": "https://static.prod-images.emergentagent.com/jobs/c953d330-38ae-4370-b16c-6a5d27c9448f/images/ab4b7e50b1748300f9b350fe68960e7375287a6767468b28fdd160e2d398fb5a.png",
+        "description": "Cool character with sunglasses and money. Use when status is 'Aman' (Safe)."
+      },
+      "status_agak_panas": {
+        "url": "https://static.prod-images.emergentagent.com/jobs/c953d330-38ae-4370-b16c-6a5d27c9448f/images/07f1ebb03e94054a83f741777c2243c75283f19dd2f2c40276cec14c37a49c95.png",
+        "description": "Sweating character. Use when status is 'Agak Panas' (Warm)."
+      },
+      "status_rem_dikit": {
+        "url": "https://static.prod-images.emergentagent.com/jobs/c953d330-38ae-4370-b16c-6a5d27c9448f/images/011dc7c7846fdb1d4682cdfab02d93216416031940dfa8d27b42ed2f7625f40e.png",
+        "description": "Panicked character pulling handbrake. Use when status is 'Rem Dikit Bos' (Brake a bit)."
+      },
+      "status_boncos": {
+        "url": "https://static.prod-images.emergentagent.com/jobs/c953d330-38ae-4370-b16c-6a5d27c9448f/images/e7afea8315adb3c117622e6fbbf69ec9170c0febc94eaf5ecbf8bd51ac78201f.png",
+        "description": "Crying character with empty wallet. Use when status is 'Boncos Total' (Broke)."
+      }
+    }
+  },
+  "testing": {
+    "requirements": "CRITICAL: All interactive and key informational elements MUST include a `testID` attribute (React Native's equivalent of data-testid). E.g., `testID=\"quick-expense-10k\"`, `testID=\"daily-allowance-display\"`."
+  },
+  "instructions_to_main_agent": [
+    "Design specifically for React Native Expo using NativeWind. Map web tailwind rules to mobile equivalents.",
+    "Do NOT use TypeScript. All files must be .js/.jsx.",
+    "Implement Google Social Login using Expo AuthSession or equivalent standard for RN.",
+    "The core logic must immediately recalculate: jatah_harian = sisa_saldo / sisa_hari_menuju_refill.",
+    "The app has a dual-language toggle (Indonesian & English). Ensure UI layout supports both without breaking.",
+    "Use the generated illustrations inside the Daily Allowance Dashboard or in empty states to add emotional weight to the budget status.",
+    "Ensure the Neo-Brutalist shadow technique works in RN. If NativeWind's box-shadow fails, use a wrapper `View` with absolute positioning, an offset, and black background to simulate the hard edge shadow."
+  ]
+}

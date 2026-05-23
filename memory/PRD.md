@@ -12,17 +12,19 @@ jatah_harian = sisa_saldo / sisa_hari_menuju_refill
 - **Backend**: FastAPI + MongoDB (Motor)
 - **Frontend**: Expo Router (React Native) with TypeScript
 - **Auth**: Google OAuth via Emergent-managed auth
-- **Database**: MongoDB (users, user_sessions, budgets, expenses)
+- **Database**: MongoDB (users, user_sessions, budgets, expenses, daily_checkins)
 
-## Features (MVP)
+## Features (MVP v2)
 1. **Google Social Login** — Emergent-managed Google OAuth
-2. **Budget Setup** — Set total balance + refill/payday date + label
-3. **Daily Allowance Dashboard** — Dynamic calculation of daily safe spending
-4. **Quick Expense Input** — 10k/20k/50k/100k buttons + custom amount modal
-5. **Budget Health Status** — Aman (≥60%), Agak Panas (≥35%), Rem Dikit (≥15%), Boncos (<15%)
-6. **Expense History** — Grouped by date, with delete + balance restoration
-7. **Dark/Light Mode** — User toggleable theme
-8. **Bilingual (ID/EN)** — Indonesian & English language toggle
+2. **Multi Budget Pot** — Multiple budgets with categories (Makan, Transport, Kopi/Jajan, Hiburan, Belanja, Umum)
+3. **Daily Allowance Dashboard** — Dynamic calculation per budget pot
+4. **Inline Expense Input** — Textbox with Rp prefix + quick fill buttons (+10k/+20k/+50k/+100k) that add to textbox
+5. **Thousand Separator** — Indonesian format (dots: 1.000.000)
+6. **Budget Health Status** — Aman (≥60%), Agak Panas (≥35%), Rem Dikit (≥15%), Boncos (<15%)
+7. **Expense History** — Grouped by date, filterable by budget pot, with delete
+8. **Streak & Daily Habit** — Current streak, longest streak, 7-day calendar, auto-records on expense input
+9. **Dark/Light Mode** — User toggleable theme
+10. **Bilingual (ID/EN)** — Indonesian & English language toggle
 
 ## API Endpoints
 | Method | Path | Description |
@@ -31,20 +33,22 @@ jatah_harian = sisa_saldo / sisa_hari_menuju_refill
 | POST | /api/auth/session | Create session from Google OAuth |
 | GET | /api/auth/me | Get current user |
 | POST | /api/auth/logout | Logout |
-| POST | /api/budgets | Create/replace budget |
-| GET | /api/budgets | Get active budget |
-| POST | /api/expenses | Add expense |
-| GET | /api/expenses | List expenses |
+| POST | /api/budgets | Create budget pot |
+| GET | /api/budgets | List all active budget pots |
+| DELETE | /api/budgets/{id} | Delete budget pot |
+| POST | /api/expenses | Add expense + record streak |
+| GET | /api/expenses | List expenses (optional budget_id filter) |
 | DELETE | /api/expenses/{id} | Delete expense + restore balance |
-| GET | /api/dashboard | Dashboard data with calculations |
+| GET | /api/dashboard | Dashboard data (optional budget_id filter) |
+| GET | /api/streak | Streak info (current, longest, 7-day) |
 
 ## Design
 - Neo-brutalist style with hard shadows and thick borders
 - Status-colored hero card (Green/Yellow/Orange/Red)
 - Character illustrations for each health status
+- Inline expense form with quick-fill buttons
 
 ## Future Features
-- Multi budget pots (makan, transport, etc.)
-- Streak/habit tracking
-- CSV/Cloud export
 - Daily reminder notifications
+- CSV/Cloud export
+- Shared budget pots

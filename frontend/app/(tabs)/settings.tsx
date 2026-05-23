@@ -67,16 +67,30 @@ export default function SettingsScreen() {
   const [contactMsg, setContactMsg] = useState('');
   const [sendingMsg, setSendingMsg] = useState(false);
 
-  // Offline
+  // Offline detection using NetInfo-like approach (cross-platform)
   const [isOffline, setIsOffline] = useState(false);
 
   useEffect(() => {
-    // Simple offline detection
-    const checkOnline = () => setIsOffline(!navigator.onLine);
-    if (typeof window !== 'undefined' && typeof navigator !== 'undefined') {
-      setIsOffline(!navigator.onLine);
-      window.addEventListener('online', () => setIsOffline(false));
-      window.addEventListener('offline', () => setIsOffline(true));
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+        setIsOffline(!navigator.onLine);
+        const goOnline = () => setIsOffline(false);
+        const goOffline = () => setIsOffline(true);
+        window.addEventListener('online', goOnline);
+        window.addEventListener('offline', goOffline);
+        return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); };
+      }
+    } else {
+      // On native, check by pinging the backend
+      const check = async () => {
+        try {
+          const res = await fetch(process.env.EXPO_PUBLIC_BACKEND_URL + '/api/health', { method: 'GET' });
+          setIsOffline(!res.ok);
+        } catch { setIsOffline(true); }
+      };
+      check();
+      const interval = setInterval(check, 30000);
+      return () => clearInterval(interval);
     }
   }, []);
 

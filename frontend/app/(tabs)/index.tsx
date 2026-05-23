@@ -125,10 +125,11 @@ export default function DashboardScreen() {
       const pots: BudgetPot[] = budgetsData.budgets || [];
       setBudgets(pots);
 
-      // Auto-select first budget if none selected
+      // Auto-select first non-locked budget if none selected
       let budgetId = selectedBudgetId;
-      if (!budgetId && pots.length > 0) {
-        budgetId = pots[0].budget_id;
+      const activePots = pots.filter((p: any) => !p.is_locked);
+      if (!budgetId && activePots.length > 0) {
+        budgetId = activePots[0].budget_id;
         setSelectedBudgetId(budgetId);
       }
 
@@ -284,9 +285,8 @@ export default function DashboardScreen() {
         {/* Budget Pot Selector - horizontal scroll */}
         {budgets.length > 1 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.potScroll} contentContainerStyle={styles.potScrollContent}>
-            {budgets.map((pot) => {
+            {budgets.filter((p: any) => !p.is_locked).map((pot) => {
               const isSelected = pot.budget_id === selectedBudgetId;
-              const iconName = CATEGORY_ICONS[pot.category] || 'wallet';
               return (
                 <TouchableOpacity
                   key={pot.budget_id}
@@ -303,7 +303,6 @@ export default function DashboardScreen() {
                     setLoading(true);
                   }}
                 >
-                  <Ionicons name={iconName as any} size={16} color={isSelected ? '#111' : colors.text} />
                   <Text style={[styles.potChipText, { color: isSelected ? '#111' : colors.text }]}>
                     {pot.label}
                   </Text>

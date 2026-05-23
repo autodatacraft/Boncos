@@ -24,6 +24,46 @@ api_router = APIRouter(prefix="/api")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# ─── Subscription Plans ───
+PLANS = {
+    "FREE": {"id": "FREE", "displayName": "Free", "badgeName": None, "priceLabel": "Gratis", "maxBudgetPots": 2, "isUnlimited": False},
+    "AMERICANO": {"id": "AMERICANO", "displayName": "Americano", "badgeName": "Murid Anti Boncos", "priceLabel": "Rp29.000/bln", "maxBudgetPots": 3, "isUnlimited": False},
+    "KOPI_GULA_AREN": {"id": "KOPI_GULA_AREN", "displayName": "Kopi Gula Aren", "badgeName": "Si Paling Anti Boncos", "priceLabel": "Rp49.000/bln", "maxBudgetPots": 5, "isUnlimited": False},
+    "V60": {"id": "V60", "displayName": "V60", "badgeName": "The Last Boncos Bender", "priceLabel": "Rp79.000/bln", "maxBudgetPots": 999, "isUnlimited": True},
+}
+
+def get_plan_limit(plan_id: str) -> int:
+    return PLANS.get(plan_id, PLANS["FREE"])["maxBudgetPots"]
+
+def is_unlimited_plan(plan_id: str) -> bool:
+    return PLANS.get(plan_id, PLANS["FREE"])["isUnlimited"]
+
+def get_badge_for_plan(plan_id: str) -> Optional[str]:
+    return PLANS.get(plan_id, PLANS["FREE"])["badgeName"]
+
+def apply_budget_pot_locks(budgets: list, plan_id: str) -> list:
+    limit = get_plan_limit(plan_id)
+    unlimited = is_unlimited_plan(plan_id)
+    if unlimited:
+        for b in budgets:
+            b["is_locked"] = False
+            b["locked_reason"] = None
+        return budgets
+    sorted_budgets = sorted(budgets, key=lambda x: x.get("created_at", ""))
+    for i, b in enumerate(sorted_budgets):
+        if i < limit:
+            b["is_locked"] = False
+            b["locked_reason"] = None
+        else:
+            b["is_locked"] = True
+            b["locked_reason"] = "Budget pot ini terkunci karena limit plan kamu."
+    return sorted_budgets
+
+def can_create_budget_pot(current_count: int, plan_id: str) -> bool:
+    if is_unlimited_plan(plan_id):
+        return True
+    return current_count < get_plan_limit(plan_id)
+
 # ─── Models ───
 class SessionInput(BaseModel):
     session_id: str
@@ -33,6 +73,8 @@ class UserResponse(BaseModel):
     email: str
     name: str
     picture: str
+    subscription_plan: str = "FREE"
+    supporter_badge: Optional[str] = None
 
 class BudgetCreate(BaseModel):
     total_balance: float
@@ -45,17 +87,6 @@ class BudgetUpdate(BaseModel):
     total_balance: Optional[float] = None
     refill_date: Optional[str] = None
     label: Optional[str] = None
-
-class BudgetResponse(BaseModel):
-    budget_id: str
-    user_id: str
-    total_balance: float
-    current_balance: float
-    refill_date: str
-    label: str
-    category: str
-    icon: str
-    created_at: str
 
 class ExpenseCreate(BaseModel):
     amount: float
@@ -72,6 +103,13 @@ class ExpenseResponse(BaseModel):
 
 class BulkDeleteRequest(BaseModel):
     expense_ids: List[str]
+
+class SubscribeRequest(BaseModel):
+    plan_id: str
+
+class ShareBudgetRequest(BaseModel):
+    budget_id: str
+    email: str
 
 class DashboardResponse(BaseModel):
     budget_id: str
@@ -114,28 +152,15 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
     user = await db.users.find_one({"user_id": session["user_id"]}, {"_id": 0})
     return user
 
-# ─── Auto-refill helper ───
 async def check_and_refill_budget(budget: dict):
-    """If refill_date has passed, reset budget to total_balance and set new refill_date +30 days"""
     refill_date = datetime.fromisoformat(budget["refill_date"]).replace(tzinfo=timezone.utc)
     now = datetime.now(timezone.utc)
     if now >= refill_date:
-        # Calculate new refill date (same day next month, approx 30 days)
         new_refill = refill_date + timedelta(days=30)
         while new_refill <= now:
             new_refill += timedelta(days=30)
-        await db.budgets.update_one(
-            {"budget_id": budget["budget_id"]},
-            {"$set": {
-                "current_balance": budget["total_balance"],
-                "refill_date": new_refill.isoformat(),
-            }}
-        )
-        return {
-            **budget,
-            "current_balance": budget["total_balance"],
-            "refill_date": new_refill.isoformat(),
-        }
+        await db.budgets.update_one({"budget_id": budget["budget_id"]}, {"$set": {"current_balance": budget["total_balance"], "refill_date": new_refill.isoformat()}})
+        return {**budget, "current_balance": budget["total_balance"], "refill_date": new_refill.isoformat()}
     return budget
 
 # ─── Startup ───
@@ -151,6 +176,7 @@ async def startup():
     await db.expenses.create_index([("user_id", 1), ("budget_id", 1)])
     await db.expenses.create_index("created_at")
     await db.daily_checkins.create_index([("user_id", 1), ("date", 1)], unique=True)
+    await db.shared_budgets.create_index([("budget_id", 1), ("shared_with_email", 1)], unique=True)
     logger.info("MongoDB indexes created")
 
 # ─── Auth Routes ───
@@ -171,16 +197,17 @@ async def create_session(body: SessionInput):
         await db.users.update_one({"email": email}, {"$set": {"name": name, "picture": picture}})
     else:
         user_id = f"user_{uuid.uuid4().hex[:12]}"
-        await db.users.insert_one({"user_id": user_id, "email": email, "name": name, "picture": picture, "created_at": datetime.now(timezone.utc).isoformat()})
+        await db.users.insert_one({"user_id": user_id, "email": email, "name": name, "picture": picture, "subscription_plan": "FREE", "supporter_badge": None, "created_at": datetime.now(timezone.utc).isoformat()})
     await db.user_sessions.insert_one({"session_token": session_token, "user_id": user_id, "expires_at": datetime.now(timezone.utc) + timedelta(days=7), "created_at": datetime.now(timezone.utc)})
-    return {"user_id": user_id, "email": email, "name": name, "picture": picture, "session_token": session_token}
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    return {"user_id": user_id, "email": email, "name": name, "picture": picture, "session_token": session_token, "subscription_plan": user.get("subscription_plan", "FREE"), "supporter_badge": user.get("supporter_badge")}
 
 @api_router.get("/auth/me")
 async def auth_me(authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    return UserResponse(**user)
+    return UserResponse(user_id=user["user_id"], email=user["email"], name=user["name"], picture=user["picture"], subscription_plan=user.get("subscription_plan", "FREE"), supporter_badge=user.get("supporter_badge"))
 
 @api_router.post("/auth/logout")
 async def auth_logout(authorization: Optional[str] = Header(None)):
@@ -189,37 +216,72 @@ async def auth_logout(authorization: Optional[str] = Header(None)):
         await db.user_sessions.delete_one({"session_token": token})
     return {"message": "Logged out"}
 
+# ─── Subscription Routes ───
+@api_router.get("/plans")
+async def get_plans():
+    return {"plans": list(PLANS.values())}
+
+@api_router.post("/subscribe")
+async def subscribe(body: SubscribeRequest, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    plan = PLANS.get(body.plan_id)
+    if not plan:
+        raise HTTPException(status_code=400, detail="Invalid plan")
+    # Mock payment - instant success
+    badge = get_badge_for_plan(body.plan_id)
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"subscription_plan": body.plan_id, "supporter_badge": badge, "subscription_updated_at": datetime.now(timezone.utc).isoformat()}})
+    return {"message": "Subscribed", "plan": plan, "badge": badge}
+
 # ─── Budget Routes ───
 @api_router.post("/budgets")
 async def create_budget(body: BudgetCreate, authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    plan_id = user.get("subscription_plan", "FREE")
+    active_count = await db.budgets.count_documents({"user_id": user["user_id"], "active": True})
+    if not can_create_budget_pot(active_count, plan_id):
+        raise HTTPException(status_code=403, detail=f"Limit reached. Upgrade to add more budget pots. Current plan: {plan_id}, max: {get_plan_limit(plan_id)}")
     budget_id = f"budget_{uuid.uuid4().hex[:12]}"
-    budget = {
-        "budget_id": budget_id, "user_id": user["user_id"],
-        "total_balance": body.total_balance, "current_balance": body.total_balance,
-        "refill_date": body.refill_date, "label": body.label or "Budget Utama",
-        "category": body.category or "umum", "icon": body.icon or "wallet",
-        "active": True, "created_at": datetime.now(timezone.utc).isoformat(),
-    }
+    budget = {"budget_id": budget_id, "user_id": user["user_id"], "total_balance": body.total_balance, "current_balance": body.total_balance, "refill_date": body.refill_date, "label": body.label or "Budget Utama", "category": body.category or "umum", "icon": body.icon or "wallet", "active": True, "created_at": datetime.now(timezone.utc).isoformat()}
     await db.budgets.insert_one(budget)
     del budget["_id"]
     del budget["active"]
-    return BudgetResponse(**budget)
+    budget["is_locked"] = False
+    budget["locked_reason"] = None
+    return budget
 
 @api_router.get("/budgets")
 async def get_budgets(authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    budgets = await db.budgets.find({"user_id": user["user_id"], "active": True}, {"_id": 0, "active": 0}).to_list(50)
-    # Check auto-refill for each budget
+    # Own budgets
+    own_budgets = await db.budgets.find({"user_id": user["user_id"], "active": True}, {"_id": 0, "active": 0}).to_list(50)
     refreshed = []
-    for b in budgets:
+    for b in own_budgets:
         b = await check_and_refill_budget(b)
+        b["shared"] = False
         refreshed.append(b)
-    return {"budgets": refreshed}
+    # Shared budgets
+    shared_refs = await db.shared_budgets.find({"shared_with_email": user["email"]}, {"_id": 0}).to_list(20)
+    for ref in shared_refs:
+        sb = await db.budgets.find_one({"budget_id": ref["budget_id"], "active": True}, {"_id": 0, "active": 0})
+        if sb:
+            sb = await check_and_refill_budget(sb)
+            sb["shared"] = True
+            sb["shared_by"] = ref.get("shared_by_name", "")
+            sb["is_locked"] = False
+            sb["locked_reason"] = None
+            refreshed.append(sb)
+    # Apply locks to own budgets only
+    plan_id = user.get("subscription_plan", "FREE")
+    own_only = [b for b in refreshed if not b.get("shared")]
+    shared_only = [b for b in refreshed if b.get("shared")]
+    own_locked = apply_budget_pot_locks(own_only, plan_id)
+    return {"budgets": own_locked + shared_only, "plan": plan_id, "plan_limit": get_plan_limit(plan_id), "is_unlimited": is_unlimited_plan(plan_id)}
 
 @api_router.patch("/budgets/{budget_id}")
 async def update_budget(budget_id: str, body: BudgetUpdate, authorization: Optional[str] = Header(None)):
@@ -229,15 +291,18 @@ async def update_budget(budget_id: str, body: BudgetUpdate, authorization: Optio
     budget = await db.budgets.find_one({"budget_id": budget_id, "user_id": user["user_id"], "active": True}, {"_id": 0})
     if not budget:
         raise HTTPException(status_code=404, detail="Budget not found")
+    # Check lock
+    plan_id = user.get("subscription_plan", "FREE")
+    all_budgets = await db.budgets.find({"user_id": user["user_id"], "active": True}, {"_id": 0}).to_list(50)
+    locked = apply_budget_pot_locks(all_budgets, plan_id)
+    target = next((b for b in locked if b["budget_id"] == budget_id), None)
+    if target and target.get("is_locked"):
+        raise HTTPException(status_code=403, detail="Budget pot is locked. Upgrade to edit.")
     update_fields = {}
     if body.total_balance is not None:
-        # Adjust current_balance proportionally
-        old_total = budget["total_balance"]
-        old_current = budget["current_balance"]
-        spent = old_total - old_current
-        new_current = body.total_balance - spent
+        spent = budget["total_balance"] - budget["current_balance"]
         update_fields["total_balance"] = body.total_balance
-        update_fields["current_balance"] = max(new_current, 0)
+        update_fields["current_balance"] = max(body.total_balance - spent, 0)
     if body.refill_date is not None:
         update_fields["refill_date"] = body.refill_date
     if body.label is not None:
@@ -256,7 +321,41 @@ async def delete_budget(budget_id: str, authorization: Optional[str] = Header(No
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="Budget not found")
     await db.expenses.delete_many({"budget_id": budget_id, "user_id": user["user_id"]})
+    await db.shared_budgets.delete_many({"budget_id": budget_id})
     return {"message": "Budget deleted"}
+
+# ─── Share Budget ───
+@api_router.post("/budgets/share")
+async def share_budget(body: ShareBudgetRequest, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    budget = await db.budgets.find_one({"budget_id": body.budget_id, "user_id": user["user_id"], "active": True}, {"_id": 0})
+    if not budget:
+        raise HTTPException(status_code=404, detail="Budget not found")
+    if body.email == user["email"]:
+        raise HTTPException(status_code=400, detail="Cannot share with yourself")
+    try:
+        await db.shared_budgets.insert_one({"budget_id": body.budget_id, "shared_with_email": body.email, "shared_by_user_id": user["user_id"], "shared_by_name": user["name"], "created_at": datetime.now(timezone.utc).isoformat()})
+    except Exception:
+        raise HTTPException(status_code=400, detail="Already shared with this email")
+    return {"message": f"Budget shared with {body.email}"}
+
+@api_router.get("/budgets/{budget_id}/shared")
+async def get_shared_users(budget_id: str, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    shares = await db.shared_budgets.find({"budget_id": budget_id}, {"_id": 0}).to_list(20)
+    return {"shared_with": [s["shared_with_email"] for s in shares]}
+
+@api_router.delete("/budgets/{budget_id}/shared/{email}")
+async def unshare_budget(budget_id: str, email: str, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    await db.shared_budgets.delete_one({"budget_id": budget_id, "shared_with_email": email})
+    return {"message": "Unshared"}
 
 # ─── Expense Routes ───
 @api_router.post("/expenses")
@@ -264,9 +363,21 @@ async def create_expense(body: ExpenseCreate, authorization: Optional[str] = Hea
     user = await get_current_user(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    budget = await db.budgets.find_one({"budget_id": body.budget_id, "user_id": user["user_id"], "active": True}, {"_id": 0})
+    budget = await db.budgets.find_one({"budget_id": body.budget_id, "active": True}, {"_id": 0})
     if not budget:
         raise HTTPException(status_code=404, detail="Budget not found")
+    # Check if budget is locked (only for owner)
+    if budget["user_id"] == user["user_id"]:
+        plan_id = user.get("subscription_plan", "FREE")
+        all_budgets = await db.budgets.find({"user_id": user["user_id"], "active": True}, {"_id": 0}).to_list(50)
+        locked = apply_budget_pot_locks(all_budgets, plan_id)
+        target = next((b for b in locked if b["budget_id"] == body.budget_id), None)
+        if target and target.get("is_locked"):
+            raise HTTPException(status_code=403, detail="Budget pot is locked. Upgrade to add expenses.")
+    else:
+        shared = await db.shared_budgets.find_one({"budget_id": body.budget_id, "shared_with_email": user["email"]}, {"_id": 0})
+        if not shared:
+            raise HTTPException(status_code=403, detail="No access to this budget")
     new_balance = budget["current_balance"] - body.amount
     await db.budgets.update_one({"budget_id": body.budget_id}, {"$set": {"current_balance": new_balance}})
     expense_id = f"exp_{uuid.uuid4().hex[:12]}"
@@ -297,17 +408,13 @@ async def bulk_delete_expenses(body: BulkDeleteRequest, authorization: Optional[
     user = await get_current_user(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    # Get all expenses to restore balances
     expenses = await db.expenses.find({"expense_id": {"$in": body.expense_ids}, "user_id": user["user_id"]}, {"_id": 0}).to_list(500)
-    # Group by budget_id to restore balances
     budget_amounts: dict = {}
     for exp in expenses:
         bid = exp["budget_id"]
         budget_amounts[bid] = budget_amounts.get(bid, 0) + exp["amount"]
-    # Restore balances
     for bid, amount in budget_amounts.items():
         await db.budgets.update_one({"budget_id": bid, "active": True}, {"$inc": {"current_balance": amount}})
-    # Delete expenses
     result = await db.expenses.delete_many({"expense_id": {"$in": body.expense_ids}, "user_id": user["user_id"]})
     return {"deleted_count": result.deleted_count}
 
@@ -329,10 +436,18 @@ async def get_dashboard(budget_id: Optional[str] = None, authorization: Optional
     user = await get_current_user(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    query = {"user_id": user["user_id"], "active": True}
+    query = {"active": True}
     if budget_id:
         query["budget_id"] = budget_id
-    budget = await db.budgets.find_one(query, {"_id": 0})
+        # Check own or shared
+        budget = await db.budgets.find_one(query, {"_id": 0})
+        if budget and budget["user_id"] != user["user_id"]:
+            shared = await db.shared_budgets.find_one({"budget_id": budget_id, "shared_with_email": user["email"]}, {"_id": 0})
+            if not shared:
+                return {"dashboard": None}
+    else:
+        query["user_id"] = user["user_id"]
+        budget = await db.budgets.find_one(query, {"_id": 0})
     if not budget:
         return {"dashboard": None}
     budget = await check_and_refill_budget(budget)
@@ -340,20 +455,16 @@ async def get_dashboard(budget_id: Optional[str] = None, authorization: Optional
     now = datetime.now(timezone.utc)
     days_remaining = max((refill_date - now).days, 1)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    today_expenses = await db.expenses.find({"user_id": user["user_id"], "budget_id": budget["budget_id"], "created_at": {"$gte": today_start.isoformat()}}, {"_id": 0}).to_list(500)
+    today_expenses = await db.expenses.find({"budget_id": budget["budget_id"], "created_at": {"$gte": today_start.isoformat()}}, {"_id": 0}).to_list(500)
     today_spent = sum(e["amount"] for e in today_expenses)
     total_spent = budget["total_balance"] - budget["current_balance"]
     daily_allowance = budget["current_balance"] / days_remaining if days_remaining > 0 else 0
     today_remaining = daily_allowance - today_spent
     ratio = budget["current_balance"] / budget["total_balance"] if budget["total_balance"] > 0 else 0
-    if ratio >= 0.6:
-        health_status = "aman"
-    elif ratio >= 0.35:
-        health_status = "agak_panas"
-    elif ratio >= 0.15:
-        health_status = "rem_dikit"
-    else:
-        health_status = "boncos"
+    if ratio >= 0.6: health_status = "aman"
+    elif ratio >= 0.35: health_status = "agak_panas"
+    elif ratio >= 0.15: health_status = "rem_dikit"
+    else: health_status = "boncos"
     return DashboardResponse(budget_id=budget["budget_id"], label=budget["label"], total_balance=budget["total_balance"], current_balance=budget["current_balance"], refill_date=budget["refill_date"], days_remaining=days_remaining, daily_allowance=round(daily_allowance, 0), today_spent=today_spent, today_remaining=round(today_remaining, 0), health_status=health_status, total_spent=total_spent, category=budget.get("category", "umum"), icon=budget.get("icon", "wallet"))
 
 # ─── Streak ───
@@ -368,9 +479,7 @@ async def get_streak(authorization: Optional[str] = Header(None)):
     checkin_dates = set(c["date"] for c in checkins)
     today_logged = today_str in checkin_dates
     current_streak = 0
-    check_date = now
-    if not today_logged:
-        check_date = now - timedelta(days=1)
+    check_date = now if today_logged else now - timedelta(days=1)
     while True:
         d = check_date.strftime("%Y-%m-%d")
         if d in checkin_dates:
@@ -385,26 +494,18 @@ async def get_streak(authorization: Optional[str] = Header(None)):
         for i in range(1, len(sorted_dates)):
             prev = datetime.strptime(sorted_dates[i-1], "%Y-%m-%d")
             curr = datetime.strptime(sorted_dates[i], "%Y-%m-%d")
-            if (curr - prev).days == 1:
-                streak += 1
-            else:
-                longest_streak = max(longest_streak, streak)
-                streak = 1
+            if (curr - prev).days == 1: streak += 1
+            else: longest_streak = max(longest_streak, streak); streak = 1
         longest_streak = max(longest_streak, streak)
-    last_7 = []
-    for i in range(6, -1, -1):
-        d = (now - timedelta(days=i)).strftime("%Y-%m-%d")
-        last_7.append({"date": d, "logged": d in checkin_dates})
+    last_7 = [{"date": (now - timedelta(days=i)).strftime("%Y-%m-%d"), "logged": (now - timedelta(days=i)).strftime("%Y-%m-%d") in checkin_dates} for i in range(6, -1, -1)]
     return StreakResponse(current_streak=current_streak, longest_streak=longest_streak, today_logged=today_logged, last_7_days=last_7)
 
-# ─── Notification check ───
 @api_router.get("/notification-check")
 async def notification_check(authorization: Optional[str] = Header(None)):
     user = await get_current_user(authorization)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    now = datetime.now(timezone.utc)
-    today_str = now.strftime("%Y-%m-%d")
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     checkin = await db.daily_checkins.find_one({"user_id": user["user_id"], "date": today_str}, {"_id": 0})
     return {"needs_reminder": checkin is None, "today_logged": checkin is not None}
 

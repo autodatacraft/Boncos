@@ -111,4 +111,25 @@ export const t: Translations = {
 
   // Refill
   budget_refilled: { id: 'Budget sudah di-refill! 🎉', en: 'Budget refilled! 🎉' },
+
+  // Subscription
+  join_club: { id: 'Join Anti Boncos Club', en: 'Join Anti Boncos Club' },
+  current_plan: { id: 'Plan Saat Ini', en: 'Current Plan' },
+  upgrade: { id: 'Upgrade', en: 'Upgrade' },
+  pot_locked: { id: 'Budget pot ini terkunci karena limit plan kamu.', en: 'This budget pot is locked due to your plan limit.' },
+  pot_locked_cta: { id: 'Upgrade untuk buka akses penuh', en: 'Upgrade to unlock full access' },
+  plan_free: { id: 'Free', en: 'Free' },
+  plan_americano: { id: 'Americano', en: 'Americano' },
+  plan_kopi_gula_aren: { id: 'Kopi Gula Aren', en: 'Kopi Gula Aren' },
+  plan_v60: { id: 'V60', en: 'V60' },
+  pot_limit_reached: { id: 'Limit pot tercapai! Upgrade untuk tambah.', en: 'Pot limit reached! Upgrade to add more.' },
+
+  // Share
+  share_streak: { id: 'Share Streak', en: 'Share Streak' },
+  share_budget: { id: 'Bagikan Budget', en: 'Share Budget' },
+  share_with_email: { id: 'Email teman', en: "Friend's email" },
+  shared_with: { id: 'Dibagikan ke', en: 'Shared with' },
+  shared_by: { id: 'Dari', en: 'From' },
+  share_success: { id: 'Berhasil dibagikan!', en: 'Shared successfully!' },
+  unshare: { id: 'Hapus akses', en: 'Remove access' },
 };

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, Alert, KeyboardAvoidingView, Platform, Keyboard, ActivityIndicator, Modal, Share } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
@@ -6,6 +6,7 @@ import { useAuth } from '@/src/contexts/AuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { useLanguage } from '@/src/contexts/LanguageContext';
 import { apiFetch } from '@/src/utils/api';
+import * as Linking from 'expo-linking';
 
 type BudgetPot = { budget_id: string; label: string; category: string; icon: string; total_balance: number; current_balance: number; refill_date: string; created_at: string; is_locked?: boolean; locked_reason?: string; shared?: boolean; shared_by?: string };
 type Plan = { id: string; displayName: string; badgeName: string | null; priceLabel: string; maxBudgetPots: number; isUnlimited: boolean };
@@ -60,6 +61,24 @@ export default function SettingsScreen() {
   const [sharePot, setSharePot] = useState<BudgetPot | null>(null);
   const [shareEmail, setShareEmail] = useState('');
   const [sharedWith, setSharedWith] = useState<string[]>([]);
+
+  // Contact Us
+  const [showContact, setShowContact] = useState(false);
+  const [contactMsg, setContactMsg] = useState('');
+  const [sendingMsg, setSendingMsg] = useState(false);
+
+  // Offline
+  const [isOffline, setIsOffline] = useState(false);
+
+  useEffect(() => {
+    // Simple offline detection
+    const checkOnline = () => setIsOffline(!navigator.onLine);
+    if (typeof window !== 'undefined' && typeof navigator !== 'undefined') {
+      setIsOffline(!navigator.onLine);
+      window.addEventListener('online', () => setIsOffline(false));
+      window.addEventListener('offline', () => setIsOffline(true));
+    }
+  }, []);
 
   const fetchAll = async () => {
     const [budData, plansData, streakData] = await Promise.all([
@@ -142,6 +161,26 @@ export default function SettingsScreen() {
   };
 
   const handleLogout = () => Alert.alert(s('logout'), '', [{ text: s('cancel'), style: 'cancel' }, { text: s('logout'), style: 'destructive', onPress: logout }]);
+
+  const sendContact = async () => {
+    if (!contactMsg.trim()) return;
+    setSendingMsg(true); Keyboard.dismiss();
+    const res = await apiFetch('/contact', { method: 'POST', token, body: { message: contactMsg.trim() } });
+    if (!res.error) { Alert.alert('✅', s('message_sent')); setContactMsg(''); setShowContact(false); }
+    else Alert.alert('Error', res.error);
+    setSendingMsg(false);
+  };
+
+  const exportCsv = async () => {
+    if (planId !== 'V60') { setShowSubModal(true); return; }
+    const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
+    const url = `${backendUrl}/api/export-csv`;
+    try {
+      await Linking.openURL(url);
+    } catch (e) {
+      Alert.alert('Error', 'Failed to export');
+    }
+  };
 
   const ownPots = pots.filter(p => !p.shared);
   const sharedPots = pots.filter(p => p.shared);
@@ -271,6 +310,31 @@ export default function SettingsScreen() {
           <Text style={[st.toggleText, { color: colors.text, flex: 1 }]}>{mode === 'dark' ? s('dark_mode') : s('light_mode')}</Text>
           <Text style={{ fontSize: 16 }}>🔄</Text>
         </TouchableOpacity>
+
+        {/* Export CSV (V60 only) */}
+        <Text style={[st.sectionTitle, { color: colors.text }]}>{s('export_csv')}</Text>
+        <TouchableOpacity testID="export-csv-btn" style={[st.card, { backgroundColor: planId === 'V60' ? colors.statusAman : colors.card, borderColor: colors.border, shadowColor: colors.shadow, flexDirection: 'row', alignItems: 'center', gap: 12 }]} onPress={exportCsv}>
+          <Text style={{ fontSize: 20 }}>📊</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={[st.toggleText, { color: planId === 'V60' ? '#111' : colors.text }]}>{s('export_csv')}</Text>
+            {planId !== 'V60' && <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>👑 {s('export_v60_only')}</Text>}
+          </View>
+        </TouchableOpacity>
+
+        {/* Contact Us */}
+        <Text style={[st.sectionTitle, { color: colors.text }]}>{s('contact_us')}</Text>
+        <TouchableOpacity testID="contact-us-btn" style={[st.card, { backgroundColor: colors.card, borderColor: colors.border, shadowColor: colors.shadow, flexDirection: 'row', alignItems: 'center', gap: 12 }]} onPress={() => setShowContact(true)}>
+          <Text style={{ fontSize: 20 }}>💬</Text>
+          <Text style={[st.toggleText, { color: colors.text, flex: 1 }]}>{s('contact_us')}</Text>
+        </TouchableOpacity>
+
+        {/* Offline warning */}
+        {isOffline && (
+          <View style={[st.offlineBanner, { borderColor: colors.statusBoncos }]}>
+            <Text style={[st.offlineText, { color: colors.statusBoncos }]}>{s('offline_warning')}</Text>
+          </View>
+        )}
+
         <TouchableOpacity testID="logout-btn" style={[st.logoutBtn, { backgroundColor: colors.statusBoncos, borderColor: colors.border, shadowColor: colors.shadow }]} onPress={handleLogout}>
           <Text style={st.logoutText}>🚪 {s('logout')}</Text>
         </TouchableOpacity>
@@ -358,6 +422,26 @@ export default function SettingsScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* Contact Us Modal */}
+      <Modal visible={showContact} transparent animationType="slide">
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={st.modalOverlay}>
+          <TouchableOpacity style={st.modalBg} onPress={() => { setShowContact(false); Keyboard.dismiss(); }} />
+          <View style={[st.modalSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={st.modalHandle} />
+            <Text style={[st.modalTitle, { color: colors.text }]}>💬 {s('contact_us')}</Text>
+            <TextInput testID="contact-message-input" style={[st.contactInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]} placeholder={s('contact_placeholder')} placeholderTextColor={colors.textSecondary} multiline numberOfLines={5} textAlignVertical="top" value={contactMsg} onChangeText={setContactMsg} />
+            <View style={st.modalActions}>
+              <TouchableOpacity style={[st.cancelBtn2, { borderColor: colors.border, flex: 1 }]} onPress={() => setShowContact(false)}>
+                <Text style={[st.cancelBtnText2, { color: colors.text }]}>{s('close')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity testID="send-contact-btn" style={[st.saveBtn, { backgroundColor: colors.statusAman, borderColor: colors.border, shadowColor: colors.shadow, flex: 1 }]} onPress={sendContact} disabled={sendingMsg || !contactMsg.trim()}>
+                {sendingMsg ? <ActivityIndicator size="small" color="#111" /> : <Text style={st.saveBtnText}>{s('send')}</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -423,4 +507,7 @@ const st = StyleSheet.create({
   planBenefit: { fontSize: 11, marginTop: 2 },
   planPrice: { fontSize: 14, fontWeight: '800' },
   sharedRow: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, paddingVertical: 8 },
+  contactInput: { borderWidth: 2, borderRadius: 12, padding: 14, fontSize: 15, fontWeight: '500', marginBottom: 16, minHeight: 120 },
+  offlineBanner: { borderWidth: 2, borderRadius: 12, padding: 12, marginBottom: 16, borderStyle: 'dashed' },
+  offlineText: { fontSize: 13, fontWeight: '700', textAlign: 'center' },
 });

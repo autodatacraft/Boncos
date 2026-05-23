@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, ReactNode } from 'react';
 import { storage } from '@/src/utils/storage';
 import { Language, t } from '@/src/utils/i18n';
 
@@ -28,17 +28,19 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
-  const setLang = async (l: Language) => {
+  const setLang = useCallback(async (l: Language) => {
     setLangState(l);
     await storage.setItem(LANG_KEY, l);
-  };
+  }, []);
 
-  const s = (key: string): string => {
+  const s = useCallback((key: string): string => {
     return t[key]?.[lang] || key;
-  };
+  }, [lang]);
+
+  const value = useMemo(() => ({ lang, setLang, s }), [lang, setLang, s]);
 
   return (
-    <LanguageContext.Provider value={{ lang, setLang, s }}>
+    <LanguageContext.Provider value={value}>
       {children}
     </LanguageContext.Provider>
   );

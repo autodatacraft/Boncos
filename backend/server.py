@@ -198,7 +198,12 @@ async def create_session(body: SessionInput):
     else:
         user_id = f"user_{uuid.uuid4().hex[:12]}"
         await db.users.insert_one({"user_id": user_id, "email": email, "name": name, "picture": picture, "subscription_plan": "FREE", "supporter_badge": None, "created_at": datetime.now(timezone.utc).isoformat()})
-    await db.user_sessions.insert_one({"session_token": session_token, "user_id": user_id, "expires_at": datetime.now(timezone.utc) + timedelta(days=7), "created_at": datetime.now(timezone.utc)})
+    # Upsert session to handle duplicate session tokens (re-login)
+    await db.user_sessions.update_one(
+        {"session_token": session_token},
+        {"$set": {"session_token": session_token, "user_id": user_id, "expires_at": datetime.now(timezone.utc) + timedelta(days=7), "created_at": datetime.now(timezone.utc)}},
+        upsert=True
+    )
     user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
     return {"user_id": user_id, "email": email, "name": name, "picture": picture, "session_token": session_token, "subscription_plan": user.get("subscription_plan", "FREE"), "supporter_badge": user.get("supporter_badge")}
 
@@ -508,6 +513,42 @@ async def notification_check(authorization: Optional[str] = Header(None)):
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     checkin = await db.daily_checkins.find_one({"user_id": user["user_id"], "date": today_str}, {"_id": 0})
     return {"needs_reminder": checkin is None, "today_logged": checkin is not None}
+
+# ─── Contact Us ───
+class ContactMessage(BaseModel):
+    message: str
+
+@api_router.post("/contact")
+async def send_contact(body: ContactMessage, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    msg = {"message_id": f"msg_{uuid.uuid4().hex[:12]}", "user_id": user["user_id"], "username": user["name"], "email": user["email"], "message": body.message, "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.contact_messages.insert_one(msg)
+    return {"message": "Message sent"}
+
+# ─── CSV Export (V60 only) ───
+from fastapi.responses import PlainTextResponse
+
+@api_router.get("/export-csv")
+async def export_csv(authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    plan = user.get("subscription_plan", "FREE")
+    if plan != "V60":
+        raise HTTPException(status_code=403, detail="CSV export is only available for V60 subscribers")
+    expenses = await db.expenses.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    budgets_list = await db.budgets.find({"user_id": user["user_id"]}, {"_id": 0}).to_list(50)
+    budget_map = {b["budget_id"]: b.get("label", "") for b in budgets_list}
+    csv_lines = ["Date,Amount,Note,Budget"]
+    for e in expenses:
+        date = e["created_at"][:10] if e.get("created_at") else ""
+        amt = str(e.get("amount", 0))
+        note = str(e.get("note", "")).replace(",", ";").replace("\n", " ")
+        budget_label = budget_map.get(e.get("budget_id", ""), "").replace(",", ";")
+        csv_lines.append(f"{date},{amt},{note},{budget_label}")
+    return PlainTextResponse("\n".join(csv_lines), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=boncos_export.csv"})
 
 @api_router.get("/health")
 async def health():

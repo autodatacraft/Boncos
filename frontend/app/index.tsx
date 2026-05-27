@@ -1,168 +1,121 @@
-import React from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-  Image,
-} from 'react-native';
-import { useRouter } from 'expo-router';
-import { useAuth } from '@/src/contexts/AuthContext';
-import { useTheme } from '@/src/contexts/ThemeContext';
-import { useLanguage } from '@/src/contexts/LanguageContext';
-import { Ionicons } from '@expo/vector-icons';
+import { useState } from "react";
+import { Alert, Text, TouchableOpacity, View } from "react-native";
+import { router } from "expo-router";
+import { GoogleSignin } from "@react-native-google-signin/google-signin";
+import { storage } from "@/src/utils/storage";
+import { apiFetch } from "@/src/utils/api";
 
-export default function IndexScreen() {
-  const { user, loading, login } = useAuth();
-  const { colors, mode } = useTheme();
-  const { s } = useLanguage();
-  const router = useRouter();
+const TOKEN_KEY = "boncos_session_token";
 
-  React.useEffect(() => {
-    if (!loading && user) {
-      router.replace('/(tabs)');
+GoogleSignin.configure({
+  webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+});
+
+export default function Index() {
+  const [loading, setLoading] = useState(false);
+
+  async function handleLogin() {
+    try {
+      setLoading(true);
+
+      await GoogleSignin.hasPlayServices({
+        showPlayServicesUpdateDialog: true,
+      });
+
+      const result = await GoogleSignin.signIn();
+
+	  console.log("GOOGLE SIGNIN RESULT:", JSON.stringify(result, null, 2));
+
+	  const tokens = await GoogleSignin.getTokens();
+
+	  console.log("GOOGLE TOKENS:", tokens);
+	  console.log("WEB CLIENT ID:", process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID);
+
+	const idToken = result.data?.idToken || tokens.idToken;
+      if (!idToken) {
+        throw new Error("Google login berhasil, tapi idToken kosong.");
+      }
+
+      const data = await apiFetch("/auth/google", {
+        method: "POST",
+        body: {
+          id_token: idToken,
+        },
+      });
+
+	  console.log("BACKEND LOGIN RESPONSE:", JSON.stringify(data, null, 2));
+      if (!data?.session_token) {
+        throw new Error("Backend tidak mengembalikan session_token.");
+      }
+
+      await storage.secureSet(TOKEN_KEY, data.session_token);
+
+      router.replace("/dashboard");
+    } catch (error: any) {
+      console.error("LOGIN ERROR:", error);
+      Alert.alert(
+        "Login gagal",
+        error?.message || "Ada error waktu login Google."
+      );
+    } finally {
+      setLoading(false);
     }
-  }, [loading, user]);
-
-  if (loading) {
-    return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.statusAman} />
-      </View>
-    );
   }
 
-  if (user) return null;
-
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]} testID="login-screen">
-      <View style={styles.content}>
-        {/* Logo area */}
-        <View style={[styles.logoBox, { backgroundColor: colors.statusAman, borderColor: colors.border }]}>
-          <Text style={[styles.logoText, { color: '#111' }]}>B</Text>
-        </View>
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: "#000",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <Text
+        style={{
+          color: "white",
+          fontSize: 36,
+          fontWeight: "900",
+          marginBottom: 8,
+        }}
+      >
+        Boncos
+      </Text>
 
-        <Text style={[styles.appName, { color: colors.text }]}>{s('app_name')}</Text>
-        <Text style={[styles.tagline, { color: colors.textSecondary }]}>{s('tagline')}</Text>
+      <Text
+        style={{
+          color: "#aaa",
+          textAlign: "center",
+          marginBottom: 32,
+          fontSize: 16,
+        }}
+      >
+        Cek dulu, hari ini masih aman nggak?
+      </Text>
 
-        {/* Status preview */}
-        <View style={styles.statusRow}>
-          {['🟢', '🟡', '🟠', '🔴'].map((dot, i) => (
-            <View
-              key={i}
-              style={[
-                styles.statusDot,
-                {
-                  backgroundColor: [
-                    colors.statusAman,
-                    colors.statusAgakPanas,
-                    colors.statusRemDikit,
-                    colors.statusBoncos,
-                  ][i],
-                  borderColor: colors.border,
-                },
-              ]}
-            />
-          ))}
-        </View>
-
-        {/* Google Login Button */}
-        <TouchableOpacity
-          testID="login-google-btn"
-          style={[
-            styles.loginBtn,
-            {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-              shadowColor: colors.shadow,
-            },
-          ]}
-          onPress={login}
-          activeOpacity={0.8}
+      <TouchableOpacity
+        onPress={handleLogin}
+        disabled={loading}
+        style={{
+          backgroundColor: loading ? "#777" : "white",
+          paddingVertical: 14,
+          paddingHorizontal: 28,
+          borderRadius: 16,
+          minWidth: 220,
+        }}
+      >
+        <Text
+          style={{
+            color: "#000",
+            fontWeight: "800",
+            textAlign: "center",
+            fontSize: 16,
+          }}
         >
-          <Ionicons name="logo-google" size={22} color={colors.text} />
-          <Text style={[styles.loginBtnText, { color: colors.text }]}>
-            {s('login_google')}
-          </Text>
-        </TouchableOpacity>
-      </View>
+          {loading ? "Masuk..." : "Login with Google"}
+        </Text>
+      </TouchableOpacity>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  content: {
-    alignItems: 'center',
-    width: '100%',
-    maxWidth: 360,
-  },
-  logoBox: {
-    width: 96,
-    height: 96,
-    borderRadius: 24,
-    borderWidth: 4,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 24,
-    shadowOffset: { width: 6, height: 6 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-    elevation: 8,
-  },
-  logoText: {
-    fontSize: 48,
-    fontWeight: '900',
-    letterSpacing: -2,
-  },
-  appName: {
-    fontSize: 42,
-    fontWeight: '900',
-    letterSpacing: -2,
-    marginBottom: 8,
-  },
-  tagline: {
-    fontSize: 16,
-    fontWeight: '500',
-    textAlign: 'center',
-    marginBottom: 32,
-    lineHeight: 24,
-    paddingHorizontal: 16,
-  },
-  statusRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 48,
-  },
-  statusDot: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-  },
-  loginBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    borderRadius: 16,
-    borderWidth: 3,
-    width: '100%',
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-    elevation: 6,
-  },
-  loginBtnText: {
-    fontSize: 17,
-    fontWeight: '700',
-  },
-});

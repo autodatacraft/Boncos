@@ -1,15 +1,23 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { Platform } from 'react-native';
-import * as WebBrowser from 'expo-web-browser';
-import * as Linking from 'expo-linking';
-import { storage } from '@/src/utils/storage';
-import { apiFetch } from '@/src/utils/api';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  ReactNode,
+} from "react";
+import { Platform } from "react-native";
+import {
+  GoogleSignin,
+  statusCodes,
+} from "@react-native-google-signin/google-signin";
+import { storage } from "@/src/utils/storage";
+import { apiFetch } from "@/src/utils/api";
 
 type User = {
   user_id: string;
   email: string;
   name: string;
-  picture: string;
+  picture?: string;
   subscription_plan?: string;
   supporter_badge?: string | null;
 } | null;
@@ -32,153 +40,186 @@ const AuthContext = createContext<AuthContextType>({
 
 export const useAuth = () => useContext(AuthContext);
 
-const TOKEN_KEY = 'boncos_session_token';
+const TOKEN_KEY = "boncos_session_token";
+
+function getGoogleWebClientId() {
+  const webClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
+
+  if (!webClientId) {
+    console.warn("Missing EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID");
+  }
+
+  return webClientId;
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Process session_id from URL
-  const processSessionId = async (sessionId: string) => {
-    try {
-      const data = await apiFetch('/auth/session', {
-        method: 'POST',
-        body: { session_id: sessionId },
-      });
-      if (data.session_token) {
-        if (Platform.OS === 'web') {
-          await storage.setItem(TOKEN_KEY, data.session_token);
-        } else {
-          await storage.secureSet(TOKEN_KEY, data.session_token);
-        }
-        setToken(data.session_token);
-        setUser({
-          user_id: data.user_id,
-          email: data.email,
-          name: data.name,
-          picture: data.picture,
-          subscription_plan: data.subscription_plan || 'FREE',
-          supporter_badge: data.supporter_badge,
-        });
-      }
-    } catch (e) {
-      console.error('Error processing session:', e);
+  const saveToken = async (sessionToken: string) => {
+    if (Platform.OS === "web") {
+      await storage.setItem(TOKEN_KEY, sessionToken);
+    } else {
+      await storage.secureSet(TOKEN_KEY, sessionToken);
     }
+
+    setToken(sessionToken);
   };
 
-  // Check existing session
+  const removeToken = async () => {
+    if (Platform.OS === "web") {
+      await storage.removeItem(TOKEN_KEY);
+    } else {
+      await storage.secureRemove(TOKEN_KEY);
+    }
+
+    setToken(null);
+  };
+
+  const getStoredToken = async () => {
+    if (Platform.OS === "web") {
+      return storage.getItem(TOKEN_KEY, "");
+    }
+
+    return storage.secureGet(TOKEN_KEY, "");
+  };
+
+  const setUserFromResponse = (data: any) => {
+    setUser({
+      user_id: data.user_id,
+      email: data.email,
+      name: data.name,
+      picture: data.picture,
+      subscription_plan: data.subscription_plan || "FREE",
+      supporter_badge: data.supporter_badge ?? null,
+    });
+  };
+
   const checkSession = async () => {
     try {
-      let storedToken: string | null;
-      if (Platform.OS === 'web') {
-        storedToken = await storage.getItem(TOKEN_KEY, '');
-      } else {
-        storedToken = await storage.secureGet(TOKEN_KEY, '');
+      const storedToken = await getStoredToken();
+
+      if (!storedToken) {
+        setUser(null);
+        setToken(null);
+        return;
       }
-      if (storedToken) {
-        const data = await apiFetch('/auth/me', { token: storedToken });
-        if (data.user_id) {
-          setToken(storedToken);
-          setUser({
-            ...data,
-            subscription_plan: data.subscription_plan || 'FREE',
-          });
-          return;
-        }
-        // Token invalid, clear it
-        if (Platform.OS === 'web') {
-          await storage.removeItem(TOKEN_KEY);
-        } else {
-          await storage.secureRemove(TOKEN_KEY);
-        }
+
+      const data = await apiFetch("/auth/me", {
+        token: storedToken,
+      });
+
+      if (data?.user_id) {
+        setToken(storedToken);
+        setUserFromResponse(data);
+        return;
       }
-    } catch (e) {
-      console.error('Error checking session:', e);
+
+      await removeToken();
+      setUser(null);
+    } catch (error) {
+      console.error("Error checking session:", error);
+      await removeToken();
+      setUser(null);
     }
   };
 
-  // Handle web redirect
-  useEffect(() => {
-    const init = async () => {
-      if (Platform.OS === 'web') {
-        const hash = window.location.hash;
-        const search = window.location.search;
-        let sessionId = '';
-        if (hash.includes('session_id=')) {
-          sessionId = hash.split('session_id=')[1]?.split('&')[0] || '';
-        } else if (search.includes('session_id=')) {
-          sessionId = search.split('session_id=')[1]?.split('&')[0] || '';
-        }
-        if (sessionId) {
-          window.history.replaceState(null, '', window.location.pathname);
-          await processSessionId(sessionId);
-          setLoading(false);
-          return;
-        }
-      }
-      await checkSession();
-      setLoading(false);
-    };
-    init();
-  }, []);
+	useEffect(() => {
+	  GoogleSignin.configure({
+		webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+		offlineAccess: false,
+		forceCodeForRefreshToken: false,
+	  });
 
-  // Handle mobile deep link on cold start
-  useEffect(() => {
-    if (Platform.OS === 'web') return;
-    const checkInitialUrl = async () => {
-      const url = await Linking.getInitialURL();
-      if (url) {
-        const sessionId = extractSessionId(url);
-        if (sessionId) await processSessionId(sessionId);
-      }
-    };
-    checkInitialUrl();
+	  const init = async () => {
+		console.log("AUTH INIT START");
 
-    const sub = Linking.addEventListener('url', (event) => {
-      const sessionId = extractSessionId(event.url);
-      if (sessionId) processSessionId(sessionId);
-    });
-    return () => sub.remove();
-  }, []);
+		try {
+		  // TEMPORARY: skip stored session check
+		  setUser(null);
+		  setToken(null);
+		} catch (e) {
+		  console.error("Auth init error:", e);
+		} finally {
+		  console.log("AUTH INIT DONE");
+		  setLoading(false);
+		}
+	  };
 
-  const extractSessionId = (url: string): string | null => {
-    const match = url.match(/session_id=([^&]+)/);
-    return match ? match[1] : null;
-  };
+	  init();
+	}, []);
 
   const login = async () => {
-    const redirectUrl =
-      Platform.OS === 'web'
-        ? window.location.origin + '/'
-        : Linking.createURL('auth');
+    try {
+      setLoading(true);
 
-    const authUrl = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
+      await GoogleSignin.hasPlayServices({
+        showPlayServicesUpdateDialog: true,
+      });
 
-    if (Platform.OS === 'web') {
-      window.location.href = authUrl;
-    } else {
-      const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl);
-      if (result.type === 'success' && result.url) {
-        const sessionId = extractSessionId(result.url);
-        if (sessionId) await processSessionId(sessionId);
+      const signInResult = await GoogleSignin.signIn();
+
+      const idToken = signInResult.data?.idToken;
+
+      if (!idToken) {
+        throw new Error("Google Sign-In succeeded but idToken is missing");
       }
+
+      const data = await apiFetch("/auth/google", {
+        method: "POST",
+        body: {
+          id_token: idToken,
+        },
+      });
+
+      if (!data?.session_token) {
+        throw new Error("Backend did not return session_token");
+      }
+
+      await saveToken(data.session_token);
+      setUserFromResponse(data);
+    } catch (error: any) {
+      if (error?.code === statusCodes.SIGN_IN_CANCELLED) {
+        console.log("Google Sign-In cancelled");
+      } else if (error?.code === statusCodes.IN_PROGRESS) {
+        console.log("Google Sign-In already in progress");
+      } else if (error?.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        console.error("Google Play Services not available");
+      } else {
+        console.error("Login error:", error);
+      }
+
+      setUser(null);
+    } finally {
+      setLoading(false);
     }
   };
 
   const logout = async () => {
     try {
-      await apiFetch('/auth/logout', { method: 'POST', token });
-    } catch (e) {
-      // ignore
+      setLoading(true);
+
+      try {
+        await apiFetch("/auth/logout", {
+          method: "POST",
+          token,
+        });
+      } catch {
+        // ignore backend logout failure
+      }
+
+      try {
+        await GoogleSignin.signOut();
+      } catch {
+        // ignore Google logout failure
+      }
+
+      await removeToken();
+      setUser(null);
+    } finally {
+      setLoading(false);
     }
-    if (Platform.OS === 'web') {
-      await storage.removeItem(TOKEN_KEY);
-    } else {
-      await storage.secureRemove(TOKEN_KEY);
-    }
-    setToken(null);
-    setUser(null);
   };
 
   return (

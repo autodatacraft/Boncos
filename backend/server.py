@@ -1,21 +1,32 @@
+import os
+import logging
+import httpx
+import uuid
+import certifi
+
+from pathlib import Path
+from pydantic import BaseModel, Field
+from typing import List, Optional
+from datetime import datetime, timezone, timedelta
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 from fastapi import FastAPI, APIRouter, Request, Header, HTTPException
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-import os
-import logging
-import httpx
-from pathlib import Path
-from pydantic import BaseModel, Field
-from typing import List, Optional
-import uuid
-from datetime import datetime, timezone, timedelta
+
+# wGiPUf5RkO - credentials eas
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
+client = AsyncIOMotorClient(
+    mongo_url,
+    tls=True,
+    tlsCAFile=certifi.where(),
+    serverSelectionTimeoutMS=30000,
+)
 db = client[os.environ['DB_NAME']]
 
 app = FastAPI()
@@ -180,6 +191,100 @@ async def startup():
     logger.info("MongoDB indexes created")
 
 # ─── Auth Routes ───
+@app.post("/api/auth/google")
+async def google_login(payload: dict):
+    google_id_token = payload.get("id_token")
+
+    if not google_id_token:
+        raise HTTPException(status_code=400, detail="Missing id_token")
+
+    google_client_id = os.environ.get("GOOGLE_WEB_CLIENT_ID")
+
+    if not google_client_id:
+        raise HTTPException(
+            status_code=500,
+            detail="GOOGLE_WEB_CLIENT_ID is not configured"
+        )
+
+    try:
+        google_user = id_token.verify_oauth2_token(
+            google_id_token,
+            google_requests.Request(),
+            google_client_id,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=401,
+            detail=f"Invalid Google token: {str(e)}"
+        )
+
+    email = google_user.get("email")
+    name = google_user.get("name") or email
+    picture = google_user.get("picture", "")
+    google_sub = google_user.get("sub")
+
+    if not email or not google_sub:
+        raise HTTPException(status_code=401, detail="Invalid Google user data")
+
+    now = datetime.utcnow()
+
+    existing_user = await db.users.find_one({"email": email})
+
+    if existing_user:
+        user_id = existing_user["user_id"]
+
+        await db.users.update_one(
+            {"user_id": user_id},
+            {
+                "$set": {
+                    "name": name,
+                    "picture": picture,
+                    "google_sub": google_sub,
+                    "updated_at": now.isoformat(),
+                }
+            },
+        )
+
+        user = await db.users.find_one({"user_id": user_id})
+    else:
+        user_id = str(uuid.uuid4())
+
+        user = {
+            "user_id": user_id,
+            "email": email,
+            "name": name,
+            "picture": picture,
+            "google_sub": google_sub,
+            "subscription_plan": "FREE",
+            "supporter_badge": None,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        await db.users.insert_one(user)
+
+    session_token = str(uuid.uuid4())
+    expires_at = now + timedelta(days=30)
+
+    await db.user_sessions.insert_one(
+        {
+            "session_token": session_token,
+            "user_id": user_id,
+            "created_at": now,
+            "expires_at": expires_at,
+        }
+    )
+
+    return {
+        "session_token": session_token,
+        "user_id": user_id,
+        "email": user.get("email"),
+        "name": user.get("name"),
+        "picture": user.get("picture", ""),
+        "subscription_plan": user.get("subscription_plan", "FREE"),
+        "supporter_badge": user.get("supporter_badge"),
+    }
+
 @api_router.post("/auth/session")
 async def create_session(body: SessionInput):
     async with httpx.AsyncClient() as http_client:

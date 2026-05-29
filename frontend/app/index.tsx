@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Alert, Text, TouchableOpacity, View } from "react-native";
+import { useEffect, useState } from "react";
+import { ActivityIndicator, Alert, Text, TouchableOpacity, View } from "react-native";
 import { router } from "expo-router";
 import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import { storage } from "@/src/utils/storage";
@@ -13,6 +13,36 @@ GoogleSignin.configure({
 
 export default function Index() {
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  useEffect(() => {
+    async function checkExistingSession() {
+      try {
+        const token = await storage.secureGet(TOKEN_KEY, "");
+
+        if (!token) return;
+
+        const data = await apiFetch("/auth/me", {
+          token,
+        });
+
+        if ("error" in data) {
+          await storage.secureRemove(TOKEN_KEY);
+          return;
+        }
+
+        if (data?.user_id) {
+          router.replace("/(tabs)/");
+        }
+      } catch (error) {
+        console.error("SESSION CHECK ERROR:", error);
+      } finally {
+        setCheckingSession(false);
+      }
+    }
+
+    checkExistingSession();
+  }, []);
 
   async function handleLogin() {
     try {
@@ -23,15 +53,9 @@ export default function Index() {
       });
 
       const result = await GoogleSignin.signIn();
+      const tokens = await GoogleSignin.getTokens();
+      const idToken = result.data?.idToken || tokens.idToken;
 
-	  console.log("GOOGLE SIGNIN RESULT:", JSON.stringify(result, null, 2));
-
-	  const tokens = await GoogleSignin.getTokens();
-
-	  console.log("GOOGLE TOKENS:", tokens);
-	  console.log("WEB CLIENT ID:", process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID);
-
-	const idToken = result.data?.idToken || tokens.idToken;
       if (!idToken) {
         throw new Error("Google login berhasil, tapi idToken kosong.");
       }
@@ -43,14 +67,17 @@ export default function Index() {
         },
       });
 
-	  console.log("BACKEND LOGIN RESPONSE:", JSON.stringify(data, null, 2));
+      if ("error" in data) {
+        throw new Error(data.error);
+      }
+
       if (!data?.session_token) {
         throw new Error("Backend tidak mengembalikan session_token.");
       }
 
       await storage.secureSet(TOKEN_KEY, data.session_token);
 
-      router.replace("/dashboard");
+      router.replace("/(tabs)/");
     } catch (error: any) {
       console.error("LOGIN ERROR:", error);
       Alert.alert(
@@ -60,6 +87,24 @@ export default function Index() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (checkingSession) {
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: "#000",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <ActivityIndicator size="large" color="#fff" />
+        <Text style={{ color: "#aaa", marginTop: 16 }}>
+          Ngecek dompet dulu...
+        </Text>
+      </View>
+    );
   }
 
   return (

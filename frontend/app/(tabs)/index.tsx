@@ -19,7 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { useLanguage } from '@/src/contexts/LanguageContext';
-import { apiFetch } from '@/src/utils/api';
+import { apiFetchWithAuth } from '@/src/utils/api';
 import { requestNotificationPermission, scheduleReminder, cancelReminders } from '@/src/utils/notifications';
 
 function getGreeting(s: (k: string) => string): string {
@@ -128,7 +128,7 @@ export default function DashboardScreen() {
   const fetchAll = async () => {
     try {
       // Fetch budgets list
-      const budgetsData = await apiFetch('/budgets', { token });
+      const budgetsData = await apiFetchWithAuth('/budgets', { token });
       const pots: BudgetPot[] = budgetsData.budgets || [];
       setBudgets(pots);
 
@@ -142,7 +142,7 @@ export default function DashboardScreen() {
 
       // Fetch dashboard for selected budget
       if (budgetId) {
-        const dashData = await apiFetch(`/dashboard?budget_id=${budgetId}`, { token });
+        const dashData = await apiFetchWithAuth(`/dashboard?budget_id=${budgetId}`, { token });
         if (dashData.dashboard === null || dashData.error) {
           setDashboard(null);
         } else if (dashData.budget_id) {
@@ -155,7 +155,7 @@ export default function DashboardScreen() {
       }
 
       // Fetch streak
-      const streakData = await apiFetch('/streak', { token });
+      const streakData = await apiFetchWithAuth('/streak', { token });
       if (streakData.current_streak !== undefined) {
         setStreak(streakData);
         // Schedule reminders if user hasn't logged today
@@ -207,7 +207,7 @@ export default function DashboardScreen() {
     if (!dashboard || amount <= 0) return;
     setSaving(true);
     try {
-      const result = await apiFetch('/expenses', {
+      const result = await apiFetchWithAuth('/expenses', {
         method: 'POST',
         token,
         body: { amount, note, budget_id: dashboard.budget_id },

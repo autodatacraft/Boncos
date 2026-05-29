@@ -1,3 +1,8 @@
+import { storage } from "@/src/utils/storage";
+
+const TOKEN_KEY = "boncos_session_token";
+
+
 const RAW_BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "";
 
 const BACKEND_URL = RAW_BACKEND_URL.replace(/\/+$/, "");
@@ -17,6 +22,18 @@ type ApiError = {
 function normalizePath(path: string) {
   if (!path) return "";
   return path.startsWith("/") ? path : `/${path}`;
+}
+
+export async function apiFetchWithAuth<T = any>(
+  path: string,
+  opts: FetchOptions = {}
+): Promise<T | ApiError> {
+  const token = await storage.secureGet(TOKEN_KEY, "");
+
+  return apiFetch<T>(path, {
+    ...opts,
+    token,
+  });
 }
 
 export async function apiFetch<T = any>(

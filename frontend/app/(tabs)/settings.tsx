@@ -5,7 +5,7 @@ import { useFocusEffect } from 'expo-router';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { useLanguage } from '@/src/contexts/LanguageContext';
-import { apiFetch } from '@/src/utils/api';
+import { apiFetchWithAuth } from '@/src/utils/api';
 import * as Linking from 'expo-linking';
 
 type BudgetPot = { budget_id: string; label: string; category: string; icon: string; total_balance: number; current_balance: number; refill_date: string; created_at: string; is_locked?: boolean; locked_reason?: string; shared?: boolean; shared_by?: string };
@@ -96,9 +96,9 @@ export default function SettingsScreen() {
 
   const fetchAll = async () => {
     const [budData, plansData, streakData] = await Promise.all([
-      apiFetch('/budgets', { token }),
-      apiFetch('/plans', { token }),
-      apiFetch('/streak', { token }),
+      apiFetchWithAuth('/budgets', { token }),
+      apiFetchWithAuth('/plans', { token }),
+      apiFetchWithAuth('/streak', { token }),
     ]);
     setPots(budData.budgets || []);
     setPlanId(budData.plan || 'FREE');
@@ -116,7 +116,7 @@ export default function SettingsScreen() {
     if (!refDate || !/^\d{4}-\d{2}-\d{2}$/.test(refDate)) { Alert.alert('Error', 'Format: YYYY-MM-DD'); return; }
     setSaving(true); Keyboard.dismiss();
     const cat = CATEGORIES.find(c => c.key === selCat);
-    const res = await apiFetch('/budgets', { method: 'POST', token, body: { total_balance: amt, refill_date: refDate + 'T23:59:59', label: label || (lang === 'id' ? cat?.label_id : cat?.label_en), category: selCat, icon: cat?.icon || 'wallet' } });
+    const res = await apiFetchWithAuth('/budgets', { method: 'POST', token, body: { total_balance: amt, refill_date: refDate + 'T23:59:59', label: label || (lang === 'id' ? cat?.label_id : cat?.label_en), category: selCat, icon: cat?.icon || 'wallet' } });
     if (res.error) {
       if (res.status === 403) { setShowSubModal(true); }
       else Alert.alert('Error', res.error);
@@ -132,37 +132,37 @@ export default function SettingsScreen() {
     const amt = parseNum(editBal);
     if (!amt) { Alert.alert('Error', 'Invalid'); return; }
     setEditSaving(true); Keyboard.dismiss();
-    const res = await apiFetch(`/budgets/${editPot.budget_id}`, { method: 'PATCH', token, body: { total_balance: amt, refill_date: editRef ? editRef + 'T23:59:59' : undefined, label: editLabel || undefined } });
+    const res = await apiFetchWithAuth(`/budgets/${editPot.budget_id}`, { method: 'PATCH', token, body: { total_balance: amt, refill_date: editRef ? editRef + 'T23:59:59' : undefined, label: editLabel || undefined } });
     if (res.error) { if (res.status === 403) { setEditPot(null); setShowSubModal(true); } else Alert.alert('Error', res.error); }
     else { Alert.alert('✅', s('budget_updated')); setEditPot(null); fetchAll(); }
     setEditSaving(false);
   };
 
-  const deletePot = (id: string) => Alert.alert(s('delete_pot'), '', [{ text: s('cancel'), style: 'cancel' }, { text: s('delete'), style: 'destructive', onPress: async () => { await apiFetch(`/budgets/${id}`, { method: 'DELETE', token }); fetchAll(); } }]);
+  const deletePot = (id: string) => Alert.alert(s('delete_pot'), '', [{ text: s('cancel'), style: 'cancel' }, { text: s('delete'), style: 'destructive', onPress: async () => { await apiFetchWithAuth(`/budgets/${id}`, { method: 'DELETE', token }); fetchAll(); } }]);
 
   const subscribe = async (pid: string) => {
     setSubbing(pid);
-    const res = await apiFetch('/subscribe', { method: 'POST', token, body: { plan_id: pid } });
+    const res = await apiFetchWithAuth('/subscribe', { method: 'POST', token, body: { plan_id: pid } });
     if (!res.error) { Alert.alert('🎉', `${res.badge || 'Subscribed'}!`); setShowSubModal(false); fetchAll(); }
     setSubbing('');
   };
 
   const openShare = async (pot: BudgetPot) => {
     setSharePot(pot); setShareEmail('');
-    const res = await apiFetch(`/budgets/${pot.budget_id}/shared`, { token });
+    const res = await apiFetchWithAuth(`/budgets/${pot.budget_id}/shared`, { token });
     setSharedWith(res.shared_with || []);
   };
 
   const doShare = async () => {
     if (!sharePot || !shareEmail) return;
-    const res = await apiFetch('/budgets/share', { method: 'POST', token, body: { budget_id: sharePot.budget_id, email: shareEmail } });
+    const res = await apiFetchWithAuth('/budgets/share', { method: 'POST', token, body: { budget_id: sharePot.budget_id, email: shareEmail } });
     if (!res.error) { Alert.alert('✅', s('share_success')); setShareEmail(''); openShare(sharePot); }
     else Alert.alert('Error', res.error || res.detail);
   };
 
   const doUnshare = async (email: string) => {
     if (!sharePot) return;
-    await apiFetch(`/budgets/${sharePot.budget_id}/shared/${email}`, { method: 'DELETE', token });
+    await apiFetchWithAuth(`/budgets/${sharePot.budget_id}/shared/${email}`, { method: 'DELETE', token });
     openShare(sharePot);
   };
 
@@ -179,7 +179,7 @@ export default function SettingsScreen() {
   const sendContact = async () => {
     if (!contactMsg.trim()) return;
     setSendingMsg(true); Keyboard.dismiss();
-    const res = await apiFetch('/contact', { method: 'POST', token, body: { message: contactMsg.trim() } });
+    const res = await apiFetchWithAuth('/contact', { method: 'POST', token, body: { message: contactMsg.trim() } });
     if (!res.error) { Alert.alert('✅', s('message_sent')); setContactMsg(''); setShowContact(false); }
     else Alert.alert('Error', res.error);
     setSendingMsg(false);

@@ -7,7 +7,7 @@ export const t: Translations = {
   app_name: { id: 'Boncos', en: 'Boncos' },
   tagline: { id: 'Hari ini gue masih aman spend berapa?', en: 'How much can I safely spend today?' },
   login_google: { id: 'Masuk dengan Google', en: 'Sign in with Google' },
-  
+
   // Dashboard
   daily_allowance: { id: 'Jatah Hari Ini', en: "Today's Allowance" },
   today_spent: { id: 'Sudah Keluar', en: 'Spent Today' },
@@ -15,25 +15,26 @@ export const t: Translations = {
   remaining_balance: { id: 'Sisa Saldo', en: 'Remaining Balance' },
   days_left: { id: 'Hari Menuju Refill', en: 'Days to Refill' },
   total_spent: { id: 'Total Keluar', en: 'Total Spent' },
-  
+
   // Health status
   aman: { id: 'Aman', en: 'Safe' },
   agak_panas: { id: 'Agak Panas', en: 'Getting Warm' },
   rem_dikit: { id: 'Rem Dikit Bos', en: 'Slow Down!' },
   boncos: { id: 'Boncos Total', en: 'Broke!' },
-  
+
   // Expense input
   add_expense: { id: 'Catat Pengeluaran', en: 'Log Expense' },
   amount: { id: 'Nominal', en: 'Amount' },
   note_placeholder: { id: 'Catatan (opsional)', en: 'Note (optional)' },
+  input_amount: { id: 'Masukkan nominal', en: 'Enter amount' },
   save: { id: 'Simpan', en: 'Save' },
   cancel: { id: 'Batal', en: 'Cancel' },
-  
+
   // History
   history: { id: 'Riwayat', en: 'History' },
   no_expenses: { id: 'Belum ada pengeluaran', en: 'No expenses yet' },
   delete: { id: 'Hapus', en: 'Delete' },
-  
+
   // Settings
   settings: { id: 'Pengaturan', en: 'Settings' },
   budget_setup: { id: 'Atur Budget', en: 'Budget Setup' },
@@ -47,7 +48,7 @@ export const t: Translations = {
   light_mode: { id: 'Mode Terang', en: 'Light Mode' },
   logout: { id: 'Keluar', en: 'Logout' },
   no_budget: { id: 'Belum ada budget. Atur dulu di Settings!', en: 'No budget yet. Set up in Settings!' },
-  
+
   // Tabs
   tab_home: { id: 'Beranda', en: 'Home' },
   tab_history: { id: 'Riwayat', en: 'History' },
@@ -56,7 +57,7 @@ export const t: Translations = {
   // Quick input
   quick_input: { id: 'Input Cepat', en: 'Quick Input' },
   custom_amount: { id: 'Nominal Lain', en: 'Custom Amount' },
-  
+
   // Misc
   welcome: { id: 'Halo', en: 'Hello' },
   today: { id: 'Hari Ini', en: 'Today' },
@@ -92,8 +93,7 @@ export const t: Translations = {
   days: { id: 'hari', en: 'days' },
   today_logged: { id: 'Sudah input hari ini!', en: 'Logged today!' },
   not_logged_today: { id: 'Belum input hari ini', en: "Haven't logged today" },
-  input_amount: { id: 'Masukkan nominal', en: 'Enter amount' },
-  
+
   // Edit budget
   edit_budget: { id: 'Edit Budget', en: 'Edit Budget' },
   edit: { id: 'Edit', en: 'Edit' },
@@ -107,10 +107,10 @@ export const t: Translations = {
 
   // Notifications
   reminder_title: { id: 'Boncos Reminder', en: 'Boncos Reminder' },
-  reminder_body: { id: 'Belum input pengeluaran hari ini! Yuk catat biar ga boncos 💸', en: "You haven't logged expenses today! Log now to stay on budget 💸" },
+  reminder_body: { id: 'Belum input pengeluaran hari ini! Yuk catat biar ga boncos ', en: "You haven't logged expenses today! Log now to stay on budget " },
 
   // Refill
-  budget_refilled: { id: 'Budget sudah di-refill! 🎉', en: 'Budget refilled! 🎉' },
+  budget_refilled: { id: 'Budget sudah di-refill! ', en: 'Budget refilled! ' },
 
   // Greetings
   good_morning: { id: 'Selamat Pagi', en: 'Good Morning' },

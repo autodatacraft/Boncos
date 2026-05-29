@@ -1,4 +1,12 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, ReactNode } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  ReactNode,
+} from 'react';
 import { storage } from '@/src/utils/storage';
 import { Language, t } from '@/src/utils/i18n';
 
@@ -8,10 +16,20 @@ type LanguageContextType = {
   s: (key: string) => string;
 };
 
+const humanizeKey = (key: string): string => {
+  if (!key) return '';
+
+  return key
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, char => char.toUpperCase());
+};
+
 const LanguageContext = createContext<LanguageContextType>({
   lang: 'id',
   setLang: () => {},
-  s: (key: string) => key,
+  s: (key: string) => humanizeKey(key),
 });
 
 export const useLanguage = () => useContext(LanguageContext);
@@ -34,7 +52,8 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const s = useCallback((key: string): string => {
-    return t[key]?.[lang] || key;
+    const translated = t[key]?.[lang] || t[key]?.id || t[key]?.en;
+    return translated || humanizeKey(key);
   }, [lang]);
 
   const value = useMemo(() => ({ lang, setLang, s }), [lang, setLang, s]);

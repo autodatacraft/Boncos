@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { useLanguage } from '@/src/contexts/LanguageContext';
-import { apiFetch } from '@/src/utils/api';
+import { apiFetchWithAuth } from '@/src/utils/api';
 
 type Expense = { expense_id: string; amount: number; note: string; created_at: string; budget_id: string };
 type BudgetPot = { budget_id: string; label: string; category: string; icon: string };
@@ -54,8 +54,8 @@ export default function HistoryScreen() {
   const fetchData = async () => {
     try {
       const [expData, budData] = await Promise.all([
-        apiFetch(selectedBudgetId ? `/expenses?budget_id=${selectedBudgetId}` : '/expenses', { token }),
-        apiFetch('/budgets', { token }),
+        apiFetchWithAuth(selectedBudgetId ? `/expenses?budget_id=${selectedBudgetId}` : '/expenses', { token }),
+        apiFetchWithAuth('/budgets', { token }),
       ]);
       setExpenses(expData.expenses || []);
       setBudgets(budData.budgets || []);
@@ -103,7 +103,7 @@ export default function HistoryScreen() {
         style: 'destructive',
         onPress: async () => {
           setDeleting(true);
-          await apiFetch('/expenses/bulk-delete', {
+          await apiFetchWithAuth('/expenses/bulk-delete', {
             method: 'POST',
             token,
             body: { expense_ids: Array.from(selectedIds) },
@@ -123,7 +123,7 @@ export default function HistoryScreen() {
         text: s('yes'),
         style: 'destructive',
         onPress: async () => {
-          await apiFetch(`/expenses/${id}`, { method: 'DELETE', token });
+          await apiFetchWithAuth(`/expenses/${id}`, { method: 'DELETE', token });
           fetchData();
         },
       },

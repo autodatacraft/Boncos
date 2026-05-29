@@ -3,6 +3,7 @@ import { Tabs } from "expo-router";
 import { Text } from "react-native";
 import { useTheme } from "@/src/contexts/ThemeContext";
 import { useLanguage } from "@/src/contexts/LanguageContext";
+import { t } from "@/src/utils/i18n";
 
 const TAB_ICONS: Record<string, string> = {
   home: "🏠",
@@ -20,7 +21,11 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
 
 export default function TabLayout() {
   const { colors } = useTheme();
-  const { s } = useLanguage();
+  const { s, lang } = useLanguage();
+console.log("CURRENT LANG:", lang);
+  console.log("RAW TAB HOME:", s("tab_home"));
+  console.log("RAW T OBJECT:", t.tab_home);
+
 
   return (
     <Tabs

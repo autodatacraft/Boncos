@@ -8,7 +8,7 @@ import React, {
   ReactNode,
 } from 'react';
 import { storage } from '@/src/utils/storage';
-import { Language, t } from '@/src/utils/i18n';
+import { Language, t } from '../utils/i18n';
 
 type LanguageContextType = {
   lang: Language;
@@ -52,9 +52,12 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const s = useCallback((key: string): string => {
-    const translated = t[key]?.[lang] || t[key]?.id || t[key]?.en;
+    const safeLang: Language = lang === 'id' || lang === 'en' ? lang : 'id';
+
+    const translated = t[key]?.[safeLang] || t[key]?.id || t[key]?.en;
+
     return translated || humanizeKey(key);
-  }, [lang]);
+}, [lang]);
 
   const value = useMemo(() => ({ lang, setLang, s }), [lang, setLang, s]);
 

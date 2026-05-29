@@ -47,7 +47,7 @@ export const t: Translations = {
   dark_mode: { id: 'Mode Gelap', en: 'Dark Mode' },
   light_mode: { id: 'Mode Terang', en: 'Light Mode' },
   logout: { id: 'Keluar', en: 'Logout' },
-  no_budget: { id: 'Belum ada budget. Atur dulu di Settings!', en: 'No budget yet. Set up in Settings!' },
+  no_budget: { id: 'Belum ada budget. Atur dulu di Pengaturan!', en: 'No budget yet. Set up in Settings!' },
 
   // Tabs
   tab_home: { id: 'Beranda', en: 'Home' },

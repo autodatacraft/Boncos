@@ -1,5 +1,10 @@
 import { Stack } from "expo-router";
+import { LanguageProvider } from "@/src/contexts/LanguageContext";
 
 export default function RootLayout() {
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <LanguageProvider>
+      <Stack screenOptions={{ headerShown: false }} />
+    </LanguageProvider>
+  );
 }

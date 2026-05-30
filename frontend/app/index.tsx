@@ -5,6 +5,10 @@ import { storage } from "@/src/utils/storage";
 import { apiFetch } from "@/src/utils/api";
 import { GoogleSignin } from "@react-native-google-signin/google-signin";
 
+GoogleSignin.configure({
+  webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+});
+
 const TOKEN_KEY = "boncos_session_token";
 
 export default function Index() {

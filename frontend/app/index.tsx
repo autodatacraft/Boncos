@@ -3,6 +3,7 @@ import { ActivityIndicator, Alert, Text, TouchableOpacity, View } from "react-na
 import { router } from "expo-router";
 import { storage } from "@/src/utils/storage";
 import { apiFetch } from "@/src/utils/api";
+import { GoogleSignin } from "@react-native-google-signin/google-signin";
 
 const TOKEN_KEY = "boncos_session_token";
 

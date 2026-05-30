@@ -16,7 +16,7 @@
       "package": "com.autodatacraft.boncos",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#000000"
+        "backgroundColor": "#111827"
       },
       "edgeToEdgeEnabled": true,
       "permissions": [
@@ -35,9 +35,9 @@
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-image.png",
-          "imageWidth": 200,
-          "resizeMode": "contain",
-          "backgroundColor": "#000000"
+          "imageWidth": 1080,
+          "resizeMode": "cover",
+          "backgroundColor": "#111827"
         }
       ],
       "@react-native-google-signin/google-signin"

@@ -22,9 +22,6 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
 export default function TabLayout() {
   const { colors } = useTheme();
   const { s, lang } = useLanguage();
-console.log("CURRENT LANG:", lang);
-  console.log("RAW TAB HOME:", s("tab_home"));
-  console.log("RAW T OBJECT:", t.tab_home);
 
 
   return (

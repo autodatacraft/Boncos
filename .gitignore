@@ -86,3 +86,21 @@ android-sdk/
 credentials.json
 *.key
 .credentials
+
+# Expo
+frontend/.expo/
+
+# Python test cache
+.pytest_cache/
+
+# Mac / Windows
+Thumbs.db
+
+# Backend local db / temp
+backend/.expo/
+
+# Mongo dumps
+*.bson
+*.archive
+
+frontend/.metro-cache/

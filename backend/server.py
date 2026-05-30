@@ -146,6 +146,10 @@ class StreakResponse(BaseModel):
 # ─── Auth helpers ───
 EMERGENT_SESSION_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
 
+@app.get("/")
+async def root():
+    return {"status": "ok", "service": "boncos-backend"}
+
 async def get_current_user(authorization: Optional[str] = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
         return None

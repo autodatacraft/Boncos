@@ -47,7 +47,6 @@
     },
     "extra": {
       "projectName": "Boncos",
-      "apiUrl": "http://103.130.18.219:8000",
       "router": {},
       "eas": {
         "projectId": "8dacb8d6-582d-4e1a-b134-1751a2bf21b6"

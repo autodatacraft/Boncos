@@ -12,6 +12,7 @@ import {
 } from "@react-native-google-signin/google-signin";
 import { storage } from "@/src/utils/storage";
 import { apiFetch } from "@/src/utils/api";
+import { configureGoogleSignIn, getGoogleIdToken } from "@/services/googleAuth";
 
 type User = {
   user_id: string;
@@ -41,16 +42,6 @@ const AuthContext = createContext<AuthContextType>({
 export const useAuth = () => useContext(AuthContext);
 
 const TOKEN_KEY = "boncos_session_token";
-
-function getGoogleWebClientId() {
-  const webClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
-
-  if (!webClientId) {
-    console.warn("Missing EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID");
-  }
-
-  return webClientId;
-}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User>(null);
@@ -125,46 +116,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-	useEffect(() => {
-	  GoogleSignin.configure({
-		webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
-		offlineAccess: false,
-		forceCodeForRefreshToken: false,
-	  });
+  useEffect(() => {
+    try {
+      configureGoogleSignIn();
+    } catch (e) {
+      console.error("Google Sign-In config error:", e);
+    }
 
-	  const init = async () => {
-		console.log("AUTH INIT START");
+    const init = async () => {
+      try {
+        await checkSession();
+      } catch (e) {
+        console.error("Auth init error:", e);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-		try {
-		  // TEMPORARY: skip stored session check
-		  setUser(null);
-		  setToken(null);
-		} catch (e) {
-		  console.error("Auth init error:", e);
-		} finally {
-		  console.log("AUTH INIT DONE");
-		  setLoading(false);
-		}
-	  };
-
-	  init();
-	}, []);
+    init();
+  }, []);
 
   const login = async () => {
     try {
       setLoading(true);
 
-      await GoogleSignin.hasPlayServices({
-        showPlayServicesUpdateDialog: true,
-      });
-
-      const signInResult = await GoogleSignin.signIn();
-
-      const idToken = signInResult.data?.idToken;
-
-      if (!idToken) {
-        throw new Error("Google Sign-In succeeded but idToken is missing");
-      }
+      const idToken = await getGoogleIdToken();
 
       const data = await apiFetch("/auth/google", {
         method: "POST",

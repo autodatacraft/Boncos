@@ -3,11 +3,7 @@ import { ActivityIndicator, Alert, Text, TouchableOpacity, View } from "react-na
 import { router } from "expo-router";
 import { storage } from "@/src/utils/storage";
 import { apiFetch } from "@/src/utils/api";
-import { GoogleSignin } from "@react-native-google-signin/google-signin";
-
-GoogleSignin.configure({
-  webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
-});
+import { getGoogleIdToken } from "@/services/googleAuth";
 
 const TOKEN_KEY = "boncos_session_token";
 
@@ -32,7 +28,7 @@ export default function Index() {
         }
 
         if (data?.user_id) {
-          router.replace("/(tabs)/");
+          router.replace("/(tabs)");
         }
       } catch (error) {
         console.error("SESSION CHECK ERROR:", error);
@@ -48,17 +44,7 @@ export default function Index() {
     try {
       setLoading(true);
 
-      await GoogleSignin.hasPlayServices({
-        showPlayServicesUpdateDialog: true,
-      });
-
-      const result = await GoogleSignin.signIn();
-      const tokens = await GoogleSignin.getTokens();
-      const idToken = result.data?.idToken || tokens.idToken;
-
-      if (!idToken) {
-        throw new Error("Google login berhasil, tapi idToken kosong.");
-      }
+      const idToken = await getGoogleIdToken();
 
       const data = await apiFetch("/auth/google", {
         method: "POST",
@@ -77,7 +63,7 @@ export default function Index() {
 
       await storage.secureSet(TOKEN_KEY, data.session_token);
 
-      router.replace("/(tabs)/");
+      router.replace("/(tabs)");
     } catch (error: any) {
       console.error("LOGIN ERROR:", error);
       Alert.alert(

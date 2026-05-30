@@ -63,7 +63,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     (async () => {
-      const saved = await storage.getItem(THEME_KEY, 'dark');
+      const saved = await storage.getItem<ThemeMode>(THEME_KEY, 'dark');
       if (saved === 'light' || saved === 'dark') setMode(saved);
     })();
   }, []);

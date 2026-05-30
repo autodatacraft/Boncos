@@ -47,6 +47,9 @@
     },
     "extra": {
       "projectName": "Boncos",
+      "googleWebClientId": "183267382063-2s1povn2c4gls268k247hjqvs5b2oseb.apps.googleusercontent.com",
+      "googleAndroidClientId": "183267382063-lbntv12n1emu409ppg4binipsdd0iuga.apps.googleusercontent.com",
+      "backendUrl": "https://boncos-backend.onrender.com",
       "router": {},
       "eas": {
         "projectId": "8dacb8d6-582d-4e1a-b134-1751a2bf21b6"

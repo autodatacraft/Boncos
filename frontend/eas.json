@@ -6,13 +6,28 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "183267382063-2s1povn2c4gls268k247hjqvs5b2oseb.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "183267382063-lbntv12n1emu409ppg4binipsdd0iuga.apps.googleusercontent.com",
+        "EXPO_PUBLIC_BACKEND_URL": "https://boncos-backend.onrender.com"
+      }
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "183267382063-2s1povn2c4gls268k247hjqvs5b2oseb.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "183267382063-lbntv12n1emu409ppg4binipsdd0iuga.apps.googleusercontent.com",
+        "EXPO_PUBLIC_BACKEND_URL": "https://boncos-backend.onrender.com"
+      }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "183267382063-2s1povn2c4gls268k247hjqvs5b2oseb.apps.googleusercontent.com",
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "183267382063-lbntv12n1emu409ppg4binipsdd0iuga.apps.googleusercontent.com",
+        "EXPO_PUBLIC_BACKEND_URL": "https://boncos-backend.onrender.com"
+      }
     }
   },
   "submit": {

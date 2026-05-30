@@ -1,15 +1,10 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Text, TouchableOpacity, View } from "react-native";
 import { router } from "expo-router";
-import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import { storage } from "@/src/utils/storage";
 import { apiFetch } from "@/src/utils/api";
 
 const TOKEN_KEY = "boncos_session_token";
-
-GoogleSignin.configure({
-  webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
-});
 
 export default function Index() {
   const [loading, setLoading] = useState(false);

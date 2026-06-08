@@ -19,7 +19,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { useLanguage } from '@/src/contexts/LanguageContext';
-import { apiFetchWithAuth } from '@/src/utils/api';
+import DatePickerField, { toDateInputValue } from '@/src/components/DatePickerField';
+import { apiFetchWithAuth, getDataMutationRevision } from '@/src/utils/api';
 import { requestNotificationPermission, scheduleReminder, cancelReminders } from '@/src/utils/notifications';
 
 function getGreeting(s: (k: string) => string): string {
@@ -112,6 +113,9 @@ export default function DashboardScreen() {
   const { colors } = useTheme();
   const { s, lang } = useLanguage();
   const amountInputRef = useRef<TextInput>(null);
+  const selectedBudgetIdRef = useRef<string | null>(null);
+  const hasLoadedRef = useRef(false);
+  const lastLoadedRevisionRef = useRef(-1);
 
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [budgets, setBudgets] = useState<BudgetPot[]>([]);
@@ -123,9 +127,10 @@ export default function DashboardScreen() {
   // Expense form state
   const [amountDisplay, setAmountDisplay] = useState('');
   const [note, setNote] = useState('');
+  const [expenseDate, setExpenseDate] = useState(() => toDateInputValue(new Date()));
   const [saving, setSaving] = useState(false);
 
-  const fetchAll = async () => {
+  const fetchAll = async (budgetOverride?: string | null) => {
     try {
       // Fetch budgets list
       const budgetsData = await apiFetchWithAuth('/budgets', { token });
@@ -133,10 +138,11 @@ export default function DashboardScreen() {
       setBudgets(pots);
 
       // Auto-select first non-locked budget if none selected
-      let budgetId = selectedBudgetId;
+      let budgetId = budgetOverride !== undefined ? budgetOverride : selectedBudgetIdRef.current;
       const activePots = pots.filter((p: any) => !p.is_locked);
       if (!budgetId && activePots.length > 0) {
         budgetId = activePots[0].budget_id;
+        selectedBudgetIdRef.current = budgetId;
         setSelectedBudgetId(budgetId);
       }
 
@@ -171,6 +177,8 @@ export default function DashboardScreen() {
     } catch (e) {
       console.error('Fetch error:', e);
     } finally {
+      hasLoadedRef.current = true;
+      lastLoadedRevisionRef.current = getDataMutationRevision();
       setLoading(false);
       setRefreshing(false);
     }
@@ -178,14 +186,26 @@ export default function DashboardScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      setLoading(true);
-      fetchAll();
-    }, [token, selectedBudgetId])
+      const revision = getDataMutationRevision();
+      if (!hasLoadedRef.current) {
+        setLoading(true);
+        fetchAll();
+      } else if (lastLoadedRevisionRef.current !== revision) {
+        fetchAll();
+      }
+    }, [token])
   );
 
   const onRefresh = () => {
     setRefreshing(true);
     fetchAll();
+  };
+
+  const selectBudget = (budgetId: string) => {
+    selectedBudgetIdRef.current = budgetId;
+    setSelectedBudgetId(budgetId);
+    setLoading(true);
+    fetchAll(budgetId);
   };
 
   const handleAmountChange = (text: string) => {
@@ -210,11 +230,12 @@ export default function DashboardScreen() {
       const result = await apiFetchWithAuth('/expenses', {
         method: 'POST',
         token,
-        body: { amount, note, budget_id: dashboard.budget_id },
+        body: { amount, note, budget_id: dashboard.budget_id, expense_date: expenseDate },
       });
       if (!result.error) {
         setAmountDisplay('');
         setNote('');
+        setExpenseDate(toDateInputValue(new Date()));
         Keyboard.dismiss();
         cancelReminders(); // User logged, cancel reminders
         fetchAll();
@@ -311,8 +332,7 @@ export default function DashboardScreen() {
                     },
                   ]}
                   onPress={() => {
-                    setSelectedBudgetId(pot.budget_id);
-                    setLoading(true);
+                    selectBudget(pot.budget_id);
                   }}
                 >
                   <Text style={[styles.potChipText, { color: isSelected ? '#111' : colors.text }]}>
@@ -378,6 +398,16 @@ export default function DashboardScreen() {
         {dashboard && (
           <View style={[styles.inputCard, { backgroundColor: colors.card, borderColor: colors.border, shadowColor: colors.shadow }]}>
             <Text style={[styles.inputCardTitle, { color: colors.text }]}>{s('add_expense')}</Text>
+
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>{s('expense_date')}</Text>
+            <DatePickerField
+              testID="expense-date-input"
+              value={expenseDate}
+              onChange={setExpenseDate}
+              colors={colors}
+              todayLabel={s('today')}
+              doneLabel={lang === 'id' ? 'Selesai' : 'Done'}
+            />
 
             {/* Amount textbox */}
             <View style={[styles.amountRow, { borderColor: colors.border, backgroundColor: colors.background }]}>
@@ -580,6 +610,7 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   inputCardTitle: { fontSize: 16, fontWeight: '800', marginBottom: 14, letterSpacing: -0.5 },
+  inputLabel: { fontSize: 12, fontWeight: '700', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
   amountRow: {
     flexDirection: 'row',
     alignItems: 'center',

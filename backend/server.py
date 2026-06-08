@@ -103,6 +103,13 @@ class ExpenseCreate(BaseModel):
     amount: float
     note: Optional[str] = ""
     budget_id: str
+    expense_date: Optional[str] = None
+
+class ExpenseUpdate(BaseModel):
+    amount: Optional[float] = None
+    note: Optional[str] = None
+    budget_id: Optional[str] = None
+    expense_date: Optional[str] = None
 
 class ExpenseResponse(BaseModel):
     expense_id: str
@@ -111,6 +118,7 @@ class ExpenseResponse(BaseModel):
     amount: float
     note: str
     created_at: str
+    expense_date: Optional[str] = None
 
 class BulkDeleteRequest(BaseModel):
     expense_ids: List[str]
@@ -177,6 +185,30 @@ async def check_and_refill_budget(budget: dict):
         await db.budgets.update_one({"budget_id": budget["budget_id"]}, {"$set": {"current_balance": budget["total_balance"], "refill_date": new_refill.isoformat()}})
         return {**budget, "current_balance": budget["total_balance"], "refill_date": new_refill.isoformat()}
     return budget
+
+def parse_date_field(value: Optional[str], fallback: datetime) -> str:
+    if not value:
+        return fallback.isoformat()
+    try:
+        if len(value) == 10:
+            parsed = datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        else:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.isoformat()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+def expense_activity_date(expense: dict) -> datetime:
+    raw = expense.get("expense_date") or expense.get("created_at")
+    try:
+        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except Exception:
+        return datetime.min.replace(tzinfo=timezone.utc)
 
 # ─── Startup ───
 @app.on_event("startup")
@@ -496,7 +528,7 @@ async def create_expense(body: ExpenseCreate, authorization: Optional[str] = Hea
     await db.budgets.update_one({"budget_id": body.budget_id}, {"$set": {"current_balance": new_balance}})
     expense_id = f"exp_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc)
-    expense = {"expense_id": expense_id, "user_id": user["user_id"], "budget_id": body.budget_id, "amount": body.amount, "note": body.note or "", "created_at": now.isoformat()}
+    expense = {"expense_id": expense_id, "user_id": user["user_id"], "budget_id": body.budget_id, "amount": body.amount, "note": body.note or "", "created_at": now.isoformat(), "expense_date": parse_date_field(body.expense_date, now)}
     await db.expenses.insert_one(expense)
     del expense["_id"]
     today_str = now.strftime("%Y-%m-%d")
@@ -514,8 +546,53 @@ async def get_expenses(budget_id: Optional[str] = None, authorization: Optional[
     query = {"user_id": user["user_id"]}
     if budget_id:
         query["budget_id"] = budget_id
-    expenses = await db.expenses.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    expenses = await db.expenses.find(query, {"_id": 0}).to_list(500)
+    expenses.sort(key=expense_activity_date, reverse=True)
     return {"expenses": expenses}
+
+@api_router.patch("/expenses/{expense_id}")
+async def update_expense(expense_id: str, body: ExpenseUpdate, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    expense = await db.expenses.find_one({"expense_id": expense_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not expense:
+        raise HTTPException(status_code=404, detail="Expense not found")
+
+    new_amount = body.amount if body.amount is not None else expense["amount"]
+    if new_amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than 0")
+
+    new_budget_id = body.budget_id or expense["budget_id"]
+    if new_budget_id != expense["budget_id"]:
+        budget = await db.budgets.find_one({"budget_id": new_budget_id, "active": True}, {"_id": 0})
+        if not budget:
+            raise HTTPException(status_code=404, detail="Budget not found")
+        if budget["user_id"] != user["user_id"]:
+            shared = await db.shared_budgets.find_one({"budget_id": new_budget_id, "shared_with_email": user["email"]}, {"_id": 0})
+            if not shared:
+                raise HTTPException(status_code=403, detail="No access to this budget")
+
+    update_fields = {
+        "amount": new_amount,
+        "budget_id": new_budget_id,
+    }
+    if body.note is not None:
+        update_fields["note"] = body.note
+    if body.expense_date is not None:
+        update_fields["expense_date"] = parse_date_field(body.expense_date, expense_activity_date(expense))
+
+    if new_budget_id == expense["budget_id"]:
+        balance_delta = expense["amount"] - new_amount
+        if balance_delta:
+            await db.budgets.update_one({"budget_id": new_budget_id, "active": True}, {"$inc": {"current_balance": balance_delta}})
+    else:
+        await db.budgets.update_one({"budget_id": expense["budget_id"], "active": True}, {"$inc": {"current_balance": expense["amount"]}})
+        await db.budgets.update_one({"budget_id": new_budget_id, "active": True}, {"$inc": {"current_balance": -new_amount}})
+
+    await db.expenses.update_one({"expense_id": expense_id}, {"$set": update_fields})
+    updated = await db.expenses.find_one({"expense_id": expense_id}, {"_id": 0})
+    return updated
 
 @api_router.post("/expenses/bulk-delete")
 async def bulk_delete_expenses(body: BulkDeleteRequest, authorization: Optional[str] = Header(None)):
@@ -569,7 +646,9 @@ async def get_dashboard(budget_id: Optional[str] = None, authorization: Optional
     now = datetime.now(timezone.utc)
     days_remaining = max((refill_date - now).days, 1)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    today_expenses = await db.expenses.find({"budget_id": budget["budget_id"], "created_at": {"$gte": today_start.isoformat()}}, {"_id": 0}).to_list(500)
+    today_end = today_start + timedelta(days=1)
+    budget_expenses = await db.expenses.find({"budget_id": budget["budget_id"]}, {"_id": 0}).to_list(500)
+    today_expenses = [e for e in budget_expenses if today_start <= expense_activity_date(e) < today_end]
     today_spent = sum(e["amount"] for e in today_expenses)
     total_spent = budget["total_balance"] - budget["current_balance"]
     daily_allowance = budget["current_balance"] / days_remaining if days_remaining > 0 else 0
@@ -652,7 +731,7 @@ async def export_csv(authorization: Optional[str] = Header(None)):
     budget_map = {b["budget_id"]: b.get("label", "") for b in budgets_list}
     csv_lines = ["Date,Amount,Note,Budget"]
     for e in expenses:
-        date = e["created_at"][:10] if e.get("created_at") else ""
+        date = (e.get("expense_date") or e.get("created_at") or "")[:10]
         amt = str(e.get("amount", 0))
         note = str(e.get("note", "")).replace(",", ";").replace("\n", " ")
         budget_label = budget_map.get(e.get("budget_id", ""), "").replace(",", ";")

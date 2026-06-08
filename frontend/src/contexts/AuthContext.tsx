@@ -162,6 +162,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.log("Google Sign-In already in progress");
       } else if (error?.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
         console.error("Google Play Services not available");
+      } else if (
+        error?.code === "10" ||
+        String(error?.message).includes("DEVELOPER_ERROR")
+      ) {
+        console.error(
+          "Google Sign-In Android OAuth belum cocok dengan APK ini. Development build wajib terdaftar sebagai package com.autodatacraft.boncos.dev dengan SHA-1 15:14:E3:78:75:40:94:ED:AB:FE:9E:DE:AA:12:6C:84:4D:80:63:85, lalu APK harus dibuild ulang."
+        );
       } else {
         console.error("Login error:", error);
       }

@@ -23,6 +23,46 @@ In the output, you'll find options to open the app in a
 - [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
 - [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
 
+## Android development APK
+
+The development build uses a separate app id so it can be installed on the
+same phone as the preview build:
+
+- Preview/base Android package: `com.autodatacraft.boncos`
+- Development Android package: `com.autodatacraft.boncos.dev`
+- Development app name: `Boncos Dev`
+- Development URL scheme: `boncos-dev`
+
+Build the development APK with:
+
+```bash
+npm run build:android:dev
+```
+
+After installing the APK on the phone, start Metro for the development client:
+
+```bash
+npm run start:dev
+```
+
+The command always starts Expo in LAN mode with the development variant.
+API requests automatically use the same LAN host advertised by Expo, on port
+`8000`. Start it from the repository root with:
+
+```bash
+cd backend
+uvicorn server:app --reload --host 0.0.0.0 --port 8000
+```
+
+Google Sign-In for the development APK requires an Android OAuth client with:
+
+- Package: `com.autodatacraft.boncos.dev`
+- SHA-1: `15:14:E3:78:75:40:94:ED:AB:FE:9E:DE:AA:12:6C:84:4D:80:63:85`
+
+The development EAS profile uses `credentials.json`, keeping that fingerprint
+stable across rebuilds. The Web OAuth client ID remains the `webClientId` used
+to request the backend ID token.
+
 You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
 
 ## Get a fresh project

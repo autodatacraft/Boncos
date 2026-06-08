@@ -24,6 +24,7 @@ export const t: Translations = {
 
   // Expense input
   add_expense: { id: 'Catat Pengeluaran', en: 'Log Expense' },
+  expense_date: { id: 'Tanggal Pengeluaran', en: 'Expense Date' },
   amount: { id: 'Nominal', en: 'Amount' },
   note_placeholder: { id: 'Catatan (opsional)', en: 'Note (optional)' },
   input_amount: { id: 'Masukkan nominal', en: 'Enter amount' },

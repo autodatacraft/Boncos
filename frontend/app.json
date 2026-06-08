@@ -22,7 +22,8 @@
       "permissions": [
         "RECEIVE_BOOT_COMPLETED",
         "SCHEDULE_EXACT_ALARM"
-      ]
+      ],
+      "usesCleartextTraffic": true
     },
     "web": {
       "bundler": "metro",
@@ -48,7 +49,6 @@
     "extra": {
       "projectName": "Boncos",
       "googleWebClientId": "183267382063-2s1povn2c4gls268k247hjqvs5b2oseb.apps.googleusercontent.com",
-      "googleAndroidClientId": "183267382063-lbntv12n1emu409ppg4binipsdd0iuga.apps.googleusercontent.com",
       "backendUrl": "https://boncos-backend.onrender.com",
       "router": {},
       "eas": {

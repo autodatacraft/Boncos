@@ -1,11 +1,12 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, Alert, KeyboardAvoidingView, Platform, Keyboard, ActivityIndicator, Modal, Share } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { useLanguage } from '@/src/contexts/LanguageContext';
-import { apiFetchWithAuth } from '@/src/utils/api';
+import DatePickerField from '@/src/components/DatePickerField';
+import { apiFetchWithAuth, getBackendUrl, getDataMutationRevision } from '@/src/utils/api';
 import * as Linking from 'expo-linking';
 
 type BudgetPot = { budget_id: string; label: string; category: string; icon: string; total_balance: number; current_balance: number; refill_date: string; created_at: string; is_locked?: boolean; locked_reason?: string; shared?: boolean; shared_by?: string };
@@ -31,6 +32,8 @@ export default function SettingsScreen() {
   const { token, user, logout } = useAuth();
   const { colors, mode, toggleTheme } = useTheme();
   const { s, lang, setLang } = useLanguage();
+  const hasLoadedRef = useRef(false);
+  const lastLoadedRevisionRef = useRef(-1);
 
   const [pots, setPots] = useState<BudgetPot[]>([]);
   const [planId, setPlanId] = useState('FREE');
@@ -84,7 +87,7 @@ export default function SettingsScreen() {
       // On native, check by pinging the backend
       const check = async () => {
         try {
-          const res = await fetch(process.env.EXPO_PUBLIC_BACKEND_URL + '/api/health', { method: 'GET' });
+          const res = await fetch(`${getBackendUrl()}/api/health`, { method: 'GET' });
           setIsOffline(!res.ok);
         } catch { setIsOffline(true); }
       };
@@ -94,21 +97,36 @@ export default function SettingsScreen() {
     }
   }, []);
 
-  const fetchAll = async () => {
-    const [budData, plansData, streakData] = await Promise.all([
-      apiFetchWithAuth('/budgets', { token }),
-      apiFetchWithAuth('/plans', { token }),
-      apiFetchWithAuth('/streak', { token }),
-    ]);
-    setPots(budData.budgets || []);
-    setPlanId(budData.plan || 'FREE');
-    setPlanLimit(budData.plan_limit || 2);
-    if (plansData.plans) setPlans(plansData.plans);
-    if (streakData.current_streak !== undefined) setStreak(streakData);
-    setLoadingPots(false);
+  const fetchAll = async (showSpinner = false) => {
+    if (showSpinner) setLoadingPots(true);
+    try {
+      const [budData, plansData, streakData] = await Promise.all([
+        apiFetchWithAuth('/budgets', { token }),
+        apiFetchWithAuth('/plans', { token }),
+        apiFetchWithAuth('/streak', { token }),
+      ]);
+      setPots(budData.budgets || []);
+      setPlanId(budData.plan || 'FREE');
+      setPlanLimit(budData.plan_limit || 2);
+      if (plansData.plans) setPlans(plansData.plans);
+      if (streakData.current_streak !== undefined) setStreak(streakData);
+    } catch (e) {
+      console.error('Settings fetch error:', e);
+    } finally {
+      hasLoadedRef.current = true;
+      lastLoadedRevisionRef.current = getDataMutationRevision();
+      setLoadingPots(false);
+    }
   };
 
-  useFocusEffect(useCallback(() => { setLoadingPots(true); fetchAll(); }, [token]));
+  useFocusEffect(useCallback(() => {
+    const revision = getDataMutationRevision();
+    if (!hasLoadedRef.current) {
+      fetchAll(true);
+    } else if (lastLoadedRevisionRef.current !== revision) {
+      fetchAll(false);
+    }
+  }, [token]));
 
   const saveBudget = async () => {
     const amt = parseNum(balDisp);
@@ -187,7 +205,7 @@ export default function SettingsScreen() {
 
   const exportCsv = async () => {
     if (planId !== 'V60') { setShowSubModal(true); return; }
-    const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
+    const backendUrl = getBackendUrl();
     const url = `${backendUrl}/api/export-csv`;
     try {
       await Linking.openURL(url);
@@ -300,7 +318,14 @@ export default function SettingsScreen() {
             <TextInput testID="budget-balance-input" style={[st.balInput, { color: colors.text }]} placeholder="3.000.000" placeholderTextColor={colors.textSecondary} keyboardType="numeric" value={balDisp} onChangeText={t => setBalDisp(fmtInput(t))} />
           </View>
           <Text style={[st.inputLabel, { color: colors.textSecondary }]}>{s('refill_date')}</Text>
-          <TextInput testID="budget-refill-date-input" style={[st.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]} placeholder="2026-06-25" placeholderTextColor={colors.textSecondary} value={refDate} onChangeText={setRefDate} />
+          <DatePickerField
+            testID="budget-refill-date-input"
+            value={refDate}
+            onChange={setRefDate}
+            colors={colors}
+            todayLabel={s('today')}
+            doneLabel={lang === 'id' ? 'Selesai' : 'Done'}
+          />
           <TouchableOpacity testID="save-budget-btn" style={[st.saveBtn, { backgroundColor: colors.statusAman, borderColor: colors.border, shadowColor: colors.shadow }]} onPress={saveBudget} disabled={saving}>
             {saving ? <ActivityIndicator size="small" color="#111" /> : <Text style={st.saveBtnText}>{s('save_budget')}</Text>}
           </TouchableOpacity>
@@ -394,7 +419,14 @@ export default function SettingsScreen() {
               <TextInput testID="edit-balance-input" style={[st.balInput, { color: colors.text }]} keyboardType="numeric" value={editBal} onChangeText={t => setEditBal(fmtInput(t))} />
             </View>
             <Text style={[st.inputLabel, { color: colors.textSecondary }]}>{s('refill_date')}</Text>
-            <TextInput testID="edit-refill-input" style={[st.input, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]} value={editRef} onChangeText={setEditRef} />
+            <DatePickerField
+              testID="edit-refill-input"
+              value={editRef}
+              onChange={setEditRef}
+              colors={colors}
+              todayLabel={s('today')}
+              doneLabel={lang === 'id' ? 'Selesai' : 'Done'}
+            />
             <View style={st.modalActions}>
               <TouchableOpacity style={[st.cancelBtn2, { borderColor: colors.border, flex: 1 }]} onPress={() => setEditPot(null)}><Text style={[st.cancelBtnText2, { color: colors.text }]}>{s('cancel')}</Text></TouchableOpacity>
               <TouchableOpacity testID="save-edit-btn" style={[st.saveBtn, { backgroundColor: colors.statusAman, borderColor: colors.border, shadowColor: colors.shadow, flex: 1 }]} onPress={saveEdit} disabled={editSaving}>

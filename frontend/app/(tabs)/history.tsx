@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,11 @@ import {
   ActivityIndicator,
   RefreshControl,
   ScrollView,
+  TextInput,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
+  Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from 'expo-router';
@@ -16,9 +21,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useTheme } from '@/src/contexts/ThemeContext';
 import { useLanguage } from '@/src/contexts/LanguageContext';
-import { apiFetchWithAuth } from '@/src/utils/api';
+import DatePickerField, { toDateInputValue } from '@/src/components/DatePickerField';
+import { apiFetchWithAuth, getDataMutationRevision } from '@/src/utils/api';
 
-type Expense = { expense_id: string; amount: number; note: string; created_at: string; budget_id: string };
+type Expense = { expense_id: string; amount: number; note: string; created_at: string; expense_date?: string; budget_id: string };
 type BudgetPot = { budget_id: string; label: string; category: string; icon: string };
 
 function formatRupiah(n: number): string {
@@ -26,6 +32,10 @@ function formatRupiah(n: number): string {
 }
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+}
+function formatInputDateTime(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) + ' - ' + formatTime(iso);
 }
 function formatDate(iso: string, lang: string): string {
   const d = new Date(iso);
@@ -36,12 +46,27 @@ function formatDate(iso: string, lang: string): string {
   if (d.toDateString() === yesterday.toDateString()) return lang === 'id' ? 'Kemarin' : 'Yesterday';
   return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
 }
+function toExpenseDateInput(exp: Expense): string {
+  const raw = exp.expense_date || exp.created_at;
+  if (!raw) return toDateInputValue(new Date());
+  return raw.slice(0, 10);
+}
+function formatInputDisplay(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  return digits ? digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.') : '';
+}
+function parseFormattedNumber(formatted: string): number {
+  return parseInt(formatted.replace(/\D/g, ''), 10) || 0;
+}
 
 export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
   const { token } = useAuth();
   const { colors } = useTheme();
   const { s, lang } = useLanguage();
+  const selectedBudgetIdRef = useRef<string | null>(null);
+  const hasLoadedRef = useRef(false);
+  const lastLoadedRevisionRef = useRef(-1);
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [budgets, setBudgets] = useState<BudgetPot[]>([]);
@@ -50,11 +75,17 @@ export default function HistoryScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [editExpense, setEditExpense] = useState<Expense | null>(null);
+  const [editAmount, setEditAmount] = useState('');
+  const [editNote, setEditNote] = useState('');
+  const [editDate, setEditDate] = useState(toDateInputValue(new Date()));
+  const [editSaving, setEditSaving] = useState(false);
 
-  const fetchData = async () => {
+  const fetchData = async (budgetOverride?: string | null) => {
     try {
+      const budgetId = budgetOverride !== undefined ? budgetOverride : selectedBudgetIdRef.current;
       const [expData, budData] = await Promise.all([
-        apiFetchWithAuth(selectedBudgetId ? `/expenses?budget_id=${selectedBudgetId}` : '/expenses', { token }),
+        apiFetchWithAuth(budgetId ? `/expenses?budget_id=${budgetId}` : '/expenses', { token }),
         apiFetchWithAuth('/budgets', { token }),
       ]);
       setExpenses(expData.expenses || []);
@@ -62,6 +93,8 @@ export default function HistoryScreen() {
     } catch (e) {
       console.error(e);
     } finally {
+      hasLoadedRef.current = true;
+      lastLoadedRevisionRef.current = getDataMutationRevision();
       setLoading(false);
       setRefreshing(false);
     }
@@ -69,11 +102,25 @@ export default function HistoryScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      setLoading(true);
-      setSelectedIds(new Set());
-      fetchData();
-    }, [token, selectedBudgetId])
+      const revision = getDataMutationRevision();
+      if (!hasLoadedRef.current) {
+        setLoading(true);
+        setSelectedIds(new Set());
+        fetchData();
+      } else if (lastLoadedRevisionRef.current !== revision) {
+        setSelectedIds(new Set());
+        fetchData();
+      }
+    }, [token])
   );
+
+  const selectBudget = (budgetId: string | null) => {
+    selectedBudgetIdRef.current = budgetId;
+    setSelectedBudgetId(budgetId);
+    setLoading(true);
+    setSelectedIds(new Set());
+    fetchData(budgetId);
+  };
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -130,12 +177,42 @@ export default function HistoryScreen() {
     ]);
   };
 
+  const openEdit = (exp: Expense) => {
+    setEditExpense(exp);
+    setEditAmount(formatInputDisplay(String(exp.amount)));
+    setEditNote(exp.note || '');
+    setEditDate(toExpenseDateInput(exp));
+  };
+
+  const saveEdit = async () => {
+    if (!editExpense) return;
+    const amount = parseFormattedNumber(editAmount);
+    if (amount <= 0) {
+      Alert.alert('Error', 'Invalid amount');
+      return;
+    }
+    setEditSaving(true);
+    Keyboard.dismiss();
+    const res = await apiFetchWithAuth(`/expenses/${editExpense.expense_id}`, {
+      method: 'PATCH',
+      token,
+      body: { amount, note: editNote, expense_date: editDate },
+    });
+    if (res.error) {
+      Alert.alert('Error', res.error);
+    } else {
+      setEditExpense(null);
+      fetchData();
+    }
+    setEditSaving(false);
+  };
+
   const getBudgetLabel = (budgetId: string) => budgets.find((p) => p.budget_id === budgetId)?.label || '';
 
   // Group by date for SectionList
   const sections: { title: string; data: Expense[] }[] = [];
   expenses.forEach((exp) => {
-    const dateKey = formatDate(exp.created_at, lang);
+    const dateKey = formatDate(exp.expense_date || exp.created_at, lang);
     const existing = sections.find((s) => s.title === dateKey);
     if (existing) existing.data.push(exp);
     else sections.push({ title: dateKey, data: [exp] });
@@ -162,7 +239,7 @@ export default function HistoryScreen() {
             <TouchableOpacity
               testID="filter-all"
               style={[styles.filterPill, { backgroundColor: !selectedBudgetId ? colors.statusAman : colors.card, borderColor: colors.border }]}
-              onPress={() => { setSelectedBudgetId(null); setLoading(true); }}
+              onPress={() => selectBudget(null)}
             >
               <Text style={[styles.filterPillText, { color: !selectedBudgetId ? '#111' : colors.text }]}>{s('all_budgets')}</Text>
             </TouchableOpacity>
@@ -173,7 +250,7 @@ export default function HistoryScreen() {
                   key={b.budget_id}
                   testID={`filter-${b.budget_id}`}
                   style={[styles.filterPill, { backgroundColor: active ? colors.statusAman : colors.card, borderColor: colors.border }]}
-                  onPress={() => { setSelectedBudgetId(b.budget_id); setLoading(true); }}
+                  onPress={() => selectBudget(b.budget_id)}
                 >
                   <Text style={[styles.filterPillText, { color: active ? '#111' : colors.text }]}>{b.label}</Text>
                 </TouchableOpacity>
@@ -253,9 +330,20 @@ export default function HistoryScreen() {
                   {exp.note ? <Text style={[styles.expenseNote, { color: colors.textSecondary }]} numberOfLines={1}>{exp.note}</Text> : null}
                   <View style={styles.expenseMeta}>
                     <Text style={[styles.expenseBudget, { color: colors.textSecondary }]}>{getBudgetLabel(exp.budget_id)}</Text>
-                    <Text style={[styles.expenseTime, { color: colors.textSecondary }]}>{formatTime(exp.created_at)}</Text>
+                    <Text style={[styles.expenseTime, { color: colors.textSecondary }]}>
+                      {lang === 'id' ? 'Diinput' : 'Input'}: {formatInputDateTime(exp.created_at)}
+                    </Text>
                   </View>
                 </View>
+
+                <TouchableOpacity
+                  testID={`edit-expense-${exp.expense_id}`}
+                  onPress={() => openEdit(exp)}
+                  style={styles.xDeleteBtn}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="create-outline" size={22} color={colors.textSecondary} />
+                </TouchableOpacity>
 
                 {/* X delete icon */}
                 <TouchableOpacity
@@ -271,6 +359,58 @@ export default function HistoryScreen() {
           }}
         />
       )}
+
+      <Modal visible={!!editExpense} transparent animationType="slide">
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+          <TouchableOpacity style={styles.modalBg} onPress={() => { setEditExpense(null); Keyboard.dismiss(); }} />
+          <View style={[styles.modalSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.modalHandle} />
+            <Text style={[styles.modalTitle, { color: colors.text }]}>{lang === 'id' ? 'Edit Pengeluaran' : 'Edit Expense'}</Text>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>{s('expense_date')}</Text>
+            <DatePickerField
+              testID="edit-expense-date-input"
+              value={editDate}
+              onChange={setEditDate}
+              colors={colors}
+              todayLabel={s('today')}
+              doneLabel={lang === 'id' ? 'Selesai' : 'Done'}
+            />
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>{s('amount')}</Text>
+            <View style={[styles.amountRow, { borderColor: colors.border, backgroundColor: colors.background }]}>
+              <Text style={[styles.amountPrefix, { color: colors.textSecondary }]}>Rp</Text>
+              <TextInput
+                testID="edit-expense-amount-input"
+                style={[styles.amountInput, { color: colors.text }]}
+                keyboardType="numeric"
+                value={editAmount}
+                onChangeText={(text) => setEditAmount(formatInputDisplay(text))}
+              />
+            </View>
+            <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>{lang === 'id' ? 'Catatan' : 'Note'}</Text>
+            <TextInput
+              testID="edit-expense-note-input"
+              style={[styles.noteInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+              placeholder={s('note_placeholder')}
+              placeholderTextColor={colors.textSecondary}
+              value={editNote}
+              onChangeText={setEditNote}
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={[styles.cancelBtn, { borderColor: colors.border }]} onPress={() => setEditExpense(null)}>
+                <Text style={[styles.cancelText, { color: colors.text }]}>{s('cancel')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID="save-expense-edit-btn"
+                style={[styles.saveBtn, { backgroundColor: colors.statusAman, borderColor: colors.border }]}
+                onPress={saveEdit}
+                disabled={editSaving}
+              >
+                {editSaving ? <ActivityIndicator size="small" color="#111" /> : <Text style={styles.saveText}>{s('save')}</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -344,11 +484,26 @@ const styles = StyleSheet.create({
   expenseInfo: { flex: 1 },
   expenseAmount: { fontSize: 17, fontWeight: '800', letterSpacing: -0.5 },
   expenseNote: { fontSize: 13, marginTop: 1 },
-  expenseMeta: { flexDirection: 'row', gap: 8, marginTop: 3 },
+  expenseMeta: { gap: 2, marginTop: 3 },
   expenseBudget: { fontSize: 11, fontWeight: '600' },
   expenseTime: { fontSize: 11 },
   xDeleteBtn: {
     padding: 4,
     marginLeft: 8,
   },
+  modalOverlay: { flex: 1, justifyContent: 'flex-end' },
+  modalBg: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.5)' },
+  modalSheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 3, borderBottomWidth: 0, padding: 24, paddingBottom: 40 },
+  modalHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: '#ccc', alignSelf: 'center', marginBottom: 20 },
+  modalTitle: { fontSize: 18, fontWeight: '800', marginBottom: 16, letterSpacing: -0.5 },
+  inputLabel: { fontSize: 12, fontWeight: '700', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
+  amountRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 2, borderRadius: 12, paddingHorizontal: 14, marginBottom: 16 },
+  amountPrefix: { fontSize: 16, fontWeight: '700', marginRight: 4 },
+  amountInput: { flex: 1, fontSize: 20, fontWeight: '700', paddingVertical: 14 },
+  noteInput: { fontSize: 15, borderWidth: 2, borderRadius: 12, padding: 14, marginBottom: 16 },
+  modalActions: { flexDirection: 'row', gap: 12 },
+  cancelBtn: { flex: 1, borderWidth: 2, borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
+  cancelText: { fontSize: 15, fontWeight: '700' },
+  saveBtn: { flex: 1, borderWidth: 3, borderRadius: 14, paddingVertical: 14, alignItems: 'center' },
+  saveText: { fontSize: 16, fontWeight: '800', color: '#111' },
 });

@@ -183,8 +183,11 @@ npx expo start
 ```bash
 cd backend
 pip install -r requirements.txt
-uvicorn server:app --reload
+uvicorn server:app --reload --host 0.0.0.0 --port 8000
 ```
+
+The development APK resolves the backend from the Expo LAN host automatically,
+so the phone and development machine must be on the same network.
 
 ---
 

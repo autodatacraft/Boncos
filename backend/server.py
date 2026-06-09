@@ -125,10 +125,17 @@ class BulkDeleteRequest(BaseModel):
 
 class SubscribeRequest(BaseModel):
     plan_id: str
+    revenuecat_app_user_id: Optional[str] = None
+    entitlement_id: Optional[str] = None
+    active_entitlements: Optional[List[str]] = None
 
 class ShareBudgetRequest(BaseModel):
     budget_id: str
     email: str
+
+class CheckInCreate(BaseModel):
+    checkin_date: Optional[str] = None
+    note: Optional[str] = ""
 
 class DashboardResponse(BaseModel):
     budget_id: str
@@ -144,6 +151,11 @@ class DashboardResponse(BaseModel):
     total_spent: float
     category: str
     icon: str
+    pacing_status: str
+    pacing_amount: float
+    pacing_insight: str
+    recovery_daily_target: Optional[float] = None
+    recovery_tip: Optional[str] = None
 
 class StreakResponse(BaseModel):
     current_streak: int
@@ -209,6 +221,86 @@ def expense_activity_date(expense: dict) -> datetime:
         return parsed
     except Exception:
         return datetime.min.replace(tzinfo=timezone.utc)
+
+def activity_date_key(value: Optional[str], fallback: datetime) -> str:
+    return parse_date_field(value, fallback)[:10]
+
+async def record_daily_checkin(user_id: str, date_key: str, source: str = "expense"):
+    now = datetime.now(timezone.utc)
+    await db.daily_checkins.update_one(
+        {"user_id": user_id, "date": date_key},
+        {
+            "$set": {
+                "user_id": user_id,
+                "date": date_key,
+                "updated_at": now.isoformat(),
+            },
+            "$addToSet": {"sources": source},
+            "$setOnInsert": {"created_at": now.isoformat()},
+        },
+        upsert=True,
+    )
+
+def rupiah_compact(amount: float) -> str:
+    return f"Rp{abs(round(amount)):,}".replace(",", ".")
+
+def build_pacing_insight(today_remaining: float, daily_allowance: float, health_status: str, days_remaining: int) -> dict:
+    if today_remaining >= 0:
+        pacing_status = "safe"
+        pacing_amount = round(today_remaining, 0)
+        pacing_insight = f"Hari ini masih aman {rupiah_compact(today_remaining)}."
+    else:
+        pacing_status = "overspend"
+        pacing_amount = round(abs(today_remaining), 0)
+        pacing_insight = f"Kamu overspend {rupiah_compact(today_remaining)} dari jatah hari ini."
+
+    recovery_daily_target = None
+    recovery_tip = None
+    if health_status in {"rem_dikit", "boncos"}:
+        recovery_daily_target = max(round(daily_allowance, 0), 0)
+        recovery_tip = f"Mode hemat sampai refill: maksimal {rupiah_compact(recovery_daily_target)}/hari."
+    elif today_remaining < 0 and days_remaining > 1:
+        recovery_daily_target = max(round(daily_allowance - (abs(today_remaining) / min(days_remaining, 3)), 0), 0)
+        recovery_tip = f"Kalau mau balik aman, tahan sekitar {rupiah_compact(abs(today_remaining) / min(days_remaining, 3))}/hari selama {min(days_remaining, 3)} hari."
+
+    return {
+        "pacing_status": pacing_status,
+        "pacing_amount": pacing_amount,
+        "pacing_insight": pacing_insight,
+        "recovery_daily_target": recovery_daily_target,
+        "recovery_tip": recovery_tip,
+    }
+
+async def verify_revenuecat_entitlement(app_user_id: Optional[str], entitlement_id: str) -> bool:
+    secret_api_key = os.environ.get("REVENUECAT_SECRET_API_KEY")
+    if not secret_api_key or not app_user_id:
+        return False
+
+    url = f"https://api.revenuecat.com/v1/subscribers/{app_user_id}"
+    async with httpx.AsyncClient(timeout=10) as http_client:
+        response = await http_client.get(
+            url,
+            headers={"Authorization": f"Bearer {secret_api_key}"},
+        )
+    if response.status_code != 200:
+        return False
+
+    data = response.json()
+    entitlement = data.get("subscriber", {}).get("entitlements", {}).get(entitlement_id)
+    if not entitlement:
+        return False
+
+    expires_date = entitlement.get("expires_date")
+    if not expires_date:
+        return True
+
+    try:
+        expires_at = datetime.fromisoformat(str(expires_date).replace("Z", "+00:00"))
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return expires_at > datetime.now(timezone.utc)
+    except Exception:
+        return False
 
 # ─── Startup ───
 @app.on_event("startup")
@@ -375,9 +467,33 @@ async def subscribe(body: SubscribeRequest, authorization: Optional[str] = Heade
     plan = PLANS.get(body.plan_id)
     if not plan:
         raise HTTPException(status_code=400, detail="Invalid plan")
-    # Mock payment - instant success
+
+    payment_mode = os.environ.get("PAYMENT_MODE", "mock").lower()
+    if payment_mode == "revenuecat" and body.plan_id != "FREE":
+        entitlement = body.entitlement_id or f"boncos_{body.plan_id.lower()}"
+        entitlement_active = await verify_revenuecat_entitlement(
+            body.revenuecat_app_user_id,
+            entitlement,
+        )
+        if not entitlement_active:
+            raise HTTPException(
+                status_code=402,
+                detail="RevenueCat entitlement is not active for this plan",
+            )
+
     badge = get_badge_for_plan(body.plan_id)
-    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"subscription_plan": body.plan_id, "supporter_badge": badge, "subscription_updated_at": datetime.now(timezone.utc).isoformat()}})
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {
+            "$set": {
+                "subscription_plan": body.plan_id,
+                "supporter_badge": badge,
+                "subscription_updated_at": datetime.now(timezone.utc).isoformat(),
+                "payment_provider": "revenuecat" if payment_mode == "revenuecat" else "mock",
+                "revenuecat_app_user_id": body.revenuecat_app_user_id,
+            }
+        },
+    )
     return {"message": "Subscribed", "plan": plan, "badge": badge}
 
 # ─── Budget Routes ───
@@ -531,9 +647,8 @@ async def create_expense(body: ExpenseCreate, authorization: Optional[str] = Hea
     expense = {"expense_id": expense_id, "user_id": user["user_id"], "budget_id": body.budget_id, "amount": body.amount, "note": body.note or "", "created_at": now.isoformat(), "expense_date": parse_date_field(body.expense_date, now)}
     await db.expenses.insert_one(expense)
     del expense["_id"]
-    today_str = now.strftime("%Y-%m-%d")
     try:
-        await db.daily_checkins.update_one({"user_id": user["user_id"], "date": today_str}, {"$set": {"user_id": user["user_id"], "date": today_str, "updated_at": now.isoformat()}}, upsert=True)
+        await record_daily_checkin(user["user_id"], expense["expense_date"][:10], "expense")
     except Exception:
         pass
     return ExpenseResponse(**expense)
@@ -591,6 +706,10 @@ async def update_expense(expense_id: str, body: ExpenseUpdate, authorization: Op
         await db.budgets.update_one({"budget_id": new_budget_id, "active": True}, {"$inc": {"current_balance": -new_amount}})
 
     await db.expenses.update_one({"expense_id": expense_id}, {"$set": update_fields})
+    try:
+        await record_daily_checkin(user["user_id"], update_fields.get("expense_date", expense.get("expense_date", expense.get("created_at")))[:10], "expense")
+    except Exception:
+        pass
     updated = await db.expenses.find_one({"expense_id": expense_id}, {"_id": 0})
     return updated
 
@@ -658,7 +777,8 @@ async def get_dashboard(budget_id: Optional[str] = None, authorization: Optional
     elif ratio >= 0.35: health_status = "agak_panas"
     elif ratio >= 0.15: health_status = "rem_dikit"
     else: health_status = "boncos"
-    return DashboardResponse(budget_id=budget["budget_id"], label=budget["label"], total_balance=budget["total_balance"], current_balance=budget["current_balance"], refill_date=budget["refill_date"], days_remaining=days_remaining, daily_allowance=round(daily_allowance, 0), today_spent=today_spent, today_remaining=round(today_remaining, 0), health_status=health_status, total_spent=total_spent, category=budget.get("category", "umum"), icon=budget.get("icon", "wallet"))
+    pacing = build_pacing_insight(today_remaining, daily_allowance, health_status, days_remaining)
+    return DashboardResponse(budget_id=budget["budget_id"], label=budget["label"], total_balance=budget["total_balance"], current_balance=budget["current_balance"], refill_date=budget["refill_date"], days_remaining=days_remaining, daily_allowance=round(daily_allowance, 0), today_spent=today_spent, today_remaining=round(today_remaining, 0), health_status=health_status, total_spent=total_spent, category=budget.get("category", "umum"), icon=budget.get("icon", "wallet"), **pacing)
 
 # ─── Streak ───
 @api_router.get("/streak")
@@ -701,6 +821,16 @@ async def notification_check(authorization: Optional[str] = Header(None)):
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     checkin = await db.daily_checkins.find_one({"user_id": user["user_id"], "date": today_str}, {"_id": 0})
     return {"needs_reminder": checkin is None, "today_logged": checkin is not None}
+
+@api_router.post("/check-in")
+async def daily_check_in(body: CheckInCreate, authorization: Optional[str] = Header(None)):
+    user = await get_current_user(authorization)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    now = datetime.now(timezone.utc)
+    date_key = activity_date_key(body.checkin_date, now)
+    await record_daily_checkin(user["user_id"], date_key, "no_spend")
+    return {"message": "Checked in", "date": date_key, "source": "no_spend"}
 
 # ─── Contact Us ───
 class ContactMessage(BaseModel):

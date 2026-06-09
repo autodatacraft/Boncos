@@ -25,6 +25,9 @@ module.exports = {
     ...baseConfig.expo.extra,
     appVariant: APP_VARIANT,
     backendUrl: BACKEND_URL,
+    revenueCatAndroidApiKey: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY || "",
+    revenueCatIosApiKey: process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY || "",
+    revenueCatWebApiKey: process.env.EXPO_PUBLIC_REVENUECAT_WEB_API_KEY || "",
     projectName: IS_DEV_BUILD ? "Boncos Dev" : baseConfig.expo.extra.projectName,
   },
 };

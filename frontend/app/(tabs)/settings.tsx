@@ -8,6 +8,7 @@ import { useLanguage } from '@/src/contexts/LanguageContext';
 import DatePickerField from '@/src/components/DatePickerField';
 import { apiFetchWithAuth, getBackendUrl, getDataMutationRevision } from '@/src/utils/api';
 import * as Linking from 'expo-linking';
+import { purchaseBoncosPlan } from '@/services/revenueCat';
 
 type BudgetPot = { budget_id: string; label: string; category: string; icon: string; total_balance: number; current_balance: number; refill_date: string; created_at: string; is_locked?: boolean; locked_reason?: string; shared?: boolean; shared_by?: string };
 type Plan = { id: string; displayName: string; badgeName: string | null; priceLabel: string; maxBudgetPots: number; isUnlimited: boolean };
@@ -162,6 +163,35 @@ export default function SettingsScreen() {
     setSubbing(pid);
     const res = await apiFetchWithAuth('/subscribe', { method: 'POST', token, body: { plan_id: pid } });
     if (!res.error) { Alert.alert('🎉', `${res.badge || 'Subscribed'}!`); setShowSubModal(false); fetchAll(); }
+    setSubbing('');
+  };
+
+  void subscribe;
+
+  const subscribeWithRevenueCat = async (pid: string) => {
+    setSubbing(pid);
+    try {
+      const purchase = await purchaseBoncosPlan(pid, user?.user_id);
+      const res = await apiFetchWithAuth('/subscribe', {
+        method: 'POST',
+        token,
+        body: {
+          plan_id: pid,
+          revenuecat_app_user_id: purchase.revenuecat_app_user_id,
+          entitlement_id: purchase.entitlement_id,
+          active_entitlements: purchase.active_entitlements,
+        },
+      });
+      if (!res.error) {
+        Alert.alert(purchase.used_mock ? 'Dev Subscription' : 'Subscribed', `${res.badge || 'Subscribed'}!`);
+        setShowSubModal(false);
+        fetchAll();
+      } else {
+        Alert.alert('Error', res.error);
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Subscription failed');
+    }
     setSubbing('');
   };
 
@@ -387,7 +417,7 @@ export default function SettingsScreen() {
             <View style={st.modalHandle} />
             <Text style={[st.modalTitle, { color: colors.text }]}>{s('join_club')} ☕</Text>
             {plans.filter(p => p.id !== 'FREE').map(p => (
-              <TouchableOpacity key={p.id} testID={`plan-${p.id}`} style={[st.planCard, { backgroundColor: planId === p.id ? colors.statusAman : colors.background, borderColor: colors.border }]} onPress={() => subscribe(p.id)} disabled={!!subbing}>
+              <TouchableOpacity key={p.id} testID={`plan-${p.id}`} style={[st.planCard, { backgroundColor: planId === p.id ? colors.statusAman : colors.background, borderColor: colors.border }]} onPress={() => subscribeWithRevenueCat(p.id)} disabled={!!subbing}>
                 <View style={st.planInfo}>
                   <Text style={[st.planName, { color: planId === p.id ? '#111' : colors.text }]}>{PLAN_EMOJIS[p.id]} {p.displayName}</Text>
                   {p.badgeName && <Text style={[st.planBadge, { color: planId === p.id ? '#111' : colors.textSecondary }]}>{p.badgeName}</Text>}

@@ -7,6 +7,7 @@ import {
   ScrollView,
   TextInput,
   ActivityIndicator,
+  Alert,
   RefreshControl,
   KeyboardAvoidingView,
   Platform,
@@ -22,6 +23,7 @@ import { useLanguage } from '@/src/contexts/LanguageContext';
 import DatePickerField, { toDateInputValue } from '@/src/components/DatePickerField';
 import { apiFetchWithAuth, getDataMutationRevision } from '@/src/utils/api';
 import { requestNotificationPermission, scheduleReminder, cancelReminders } from '@/src/utils/notifications';
+import { getPendingMutationCount, queueCheckIn, queueExpense, syncPendingMutations } from '@/src/utils/offlineQueue';
 
 function getGreeting(s: (k: string) => string): string {
   const h = new Date().getHours();
@@ -44,6 +46,11 @@ type Dashboard = {
   total_spent: number;
   category: string;
   icon: string;
+  pacing_status?: string;
+  pacing_amount?: number;
+  pacing_insight?: string;
+  recovery_daily_target?: number | null;
+  recovery_tip?: string | null;
 };
 
 type BudgetPot = {
@@ -123,6 +130,8 @@ export default function DashboardScreen() {
   const [streak, setStreak] = useState<Streak | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [pendingQueueCount, setPendingQueueCount] = useState(0);
+  const [checkingIn, setCheckingIn] = useState(false);
 
   // Expense form state
   const [amountDisplay, setAmountDisplay] = useState('');
@@ -132,6 +141,9 @@ export default function DashboardScreen() {
 
   const fetchAll = async (budgetOverride?: string | null) => {
     try {
+      const syncResult = await syncPendingMutations();
+      setPendingQueueCount(syncResult.pending);
+
       // Fetch budgets list
       const budgetsData = await apiFetchWithAuth('/budgets', { token });
       const pots: BudgetPot[] = budgetsData.budgets || [];
@@ -176,6 +188,7 @@ export default function DashboardScreen() {
       }
     } catch (e) {
       console.error('Fetch error:', e);
+      setPendingQueueCount(await getPendingMutationCount());
     } finally {
       hasLoadedRef.current = true;
       lastLoadedRevisionRef.current = getDataMutationRevision();
@@ -222,6 +235,20 @@ export default function DashboardScreen() {
     amountInputRef.current?.focus();
   };
 
+  const markLocalCheckIn = (date: string) => {
+    setStreak((prev) => {
+      if (!prev) return prev;
+      const today = toDateInputValue(new Date());
+      return {
+        ...prev,
+        today_logged: prev.today_logged || date === today,
+        current_streak: date === today ? Math.max(prev.current_streak, 1) : prev.current_streak,
+        longest_streak: date === today ? Math.max(prev.longest_streak, prev.current_streak, 1) : prev.longest_streak,
+        last_7_days: prev.last_7_days.map((day) => day.date === date ? { ...day, logged: true } : day),
+      };
+    });
+  };
+
   const handleSaveExpense = async () => {
     const amount = parseFormattedNumber(amountDisplay);
     if (!dashboard || amount <= 0) return;
@@ -239,11 +266,45 @@ export default function DashboardScreen() {
         Keyboard.dismiss();
         cancelReminders(); // User logged, cancel reminders
         fetchAll();
+      } else if (result.error === 'Network error') {
+        const count = await queueExpense({ amount, note, budget_id: dashboard.budget_id, expense_date: expenseDate });
+        setPendingQueueCount(count);
+        markLocalCheckIn(expenseDate);
+        setAmountDisplay('');
+        setNote('');
+        setExpenseDate(toDateInputValue(new Date()));
+        Keyboard.dismiss();
+        Alert.alert(lang === 'id' ? 'Disimpan offline' : 'Saved offline', lang === 'id' ? 'Pengeluaran akan disync saat online.' : 'This expense will sync when you are online.');
       }
     } catch (e) {
       console.error('Save expense error:', e);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleNoSpendCheckIn = async () => {
+    if (streak?.today_logged || checkingIn) return;
+    setCheckingIn(true);
+    const today = toDateInputValue(new Date());
+    try {
+      const result = await apiFetchWithAuth('/check-in', {
+        method: 'POST',
+        token,
+        body: { checkin_date: today, note: 'no_spend' },
+      });
+      if (!result.error) {
+        cancelReminders();
+        fetchAll();
+      } else if (result.error === 'Network error') {
+        const count = await queueCheckIn({ checkin_date: today, note: 'no_spend' });
+        setPendingQueueCount(count);
+        markLocalCheckIn(today);
+        cancelReminders();
+        Alert.alert(lang === 'id' ? 'Check-in offline' : 'Offline check-in', lang === 'id' ? 'Check-in hari ini akan disync saat online.' : "Today's check-in will sync when you are online.");
+      }
+    } finally {
+      setCheckingIn(false);
     }
   };
 
@@ -370,6 +431,36 @@ export default function DashboardScreen() {
               </View>
             </View>
 
+            {pendingQueueCount > 0 && (
+              <View style={[styles.queueBanner, { backgroundColor: colors.statusAgakPanas, borderColor: colors.border }]}>
+                <Ionicons name="cloud-upload-outline" size={18} color="#111" />
+                <Text style={styles.queueBannerText}>
+                  {lang === 'id' ? `${pendingQueueCount} input menunggu sync` : `${pendingQueueCount} inputs waiting to sync`}
+                </Text>
+              </View>
+            )}
+
+            {(dashboard.pacing_insight || dashboard.recovery_tip) && (
+              <View style={[styles.insightCard, { backgroundColor: colors.card, borderColor: colors.border, shadowColor: colors.shadow }]}>
+                {dashboard.pacing_insight && (
+                  <View style={styles.insightRow}>
+                    <Ionicons
+                      name={dashboard.pacing_status === 'overspend' ? 'warning-outline' : 'checkmark-circle-outline'}
+                      size={20}
+                      color={dashboard.pacing_status === 'overspend' ? colors.statusBoncos : colors.statusAman}
+                    />
+                    <Text style={[styles.insightText, { color: colors.text }]}>{dashboard.pacing_insight}</Text>
+                  </View>
+                )}
+                {dashboard.recovery_tip && (
+                  <View style={styles.insightRow}>
+                    <Ionicons name="speedometer-outline" size={20} color={colors.statusRemDikit} />
+                    <Text style={[styles.insightText, { color: colors.text }]}>{dashboard.recovery_tip}</Text>
+                  </View>
+                )}
+              </View>
+            )}
+
             {/* Stats Grid */}
             <View style={styles.statsGrid}>
               <View style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border, shadowColor: colors.shadow }]}>
@@ -471,6 +562,27 @@ export default function DashboardScreen() {
               )}
             </TouchableOpacity>
           </View>
+        )}
+
+        {dashboard && streak && !streak.today_logged && (
+          <TouchableOpacity
+            testID="no-spend-checkin-btn"
+            style={[styles.noSpendBtn, { backgroundColor: colors.card, borderColor: colors.border, shadowColor: colors.shadow }]}
+            onPress={handleNoSpendCheckIn}
+            disabled={checkingIn}
+            activeOpacity={0.75}
+          >
+            {checkingIn ? (
+              <ActivityIndicator size="small" color={colors.statusAman} />
+            ) : (
+              <>
+                <Ionicons name="shield-checkmark-outline" size={20} color={colors.statusAman} />
+                <Text style={[styles.noSpendText, { color: colors.text }]}>
+                  {lang === 'id' ? 'Hari ini aman, tidak ada pengeluaran' : 'No spending today'}
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
         )}
 
         {/* ─── Streak Section ─── */}
@@ -583,6 +695,31 @@ const styles = StyleSheet.create({
   heroFooter: { marginTop: 8 },
   heroFooterText: { fontSize: 13, fontWeight: '700', color: '#111', opacity: 0.7 },
 
+  queueBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 2,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  queueBannerText: { color: '#111', fontSize: 13, fontWeight: '800' },
+  insightCard: {
+    borderWidth: 2,
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 16,
+    shadowOffset: { width: 3, height: 3 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 4,
+    gap: 10,
+  },
+  insightRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  insightText: { flex: 1, fontSize: 14, fontWeight: '700', lineHeight: 20 },
+
   // Stats
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 },
   statCard: {
@@ -656,6 +793,23 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   saveBtnText: { fontSize: 16, fontWeight: '800', color: '#111' },
+
+  noSpendBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 2,
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+    shadowOffset: { width: 3, height: 3 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 4,
+  },
+  noSpendText: { fontSize: 14, fontWeight: '800', textAlign: 'center' },
 
   // Streak card
   streakCard: {
